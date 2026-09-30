@@ -340,7 +340,7 @@ export default function ControlRoom() {
                     : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
                   }`}
               >
-                {v === 'explore' ? <><span className="sm:hidden">{short}</span><span className="hidden sm:inline">Exploration</span></> : short}
+                {v === 'explore' ? <><span className="sm:hidden">{short}</span><span className="hidden sm:inline">3D Exploration</span></> : short}
               </button>
             ))}
           </div>
