@@ -1,4 +1,98 @@
-# fusionsimulator.io
+# fusion-sim-3d
+
+> **A fork of [fusionsimulator.io](https://fusionsimulator.io) by Daniel Burgess
+> (Columbia Fusion Research Center)**, upstream repository
+> [d-burg/fusion-sim](https://github.com/d-burg/fusion-sim). The physics engine,
+> control room, device models and everything else below the "Exploration Room"
+> section are Daniel Burgess's work. This fork adds a 3D **Exploration Room**
+> and is maintained by Matthew Waller. Licensed GPL-3.0, like the original.
+
+![Exploration Room: DIII-D H-mode pulse, live](docs/screenshots/exploration-room.gif)
+
+## What this fork adds: the 3D Exploration Room
+
+A second view next to the control room (top bar: **Control | Exploration**, or
+`/run/<device>?view=explore`). Both views read the same live simulation, so you
+can switch mid-pulse without resetting anything.
+
+| | |
+|---|---|
+| ![Overview](docs/screenshots/diiid-overview.png) | ![Poloidal section, Te](docs/screenshots/diiid-section-te.png) |
+| DIII-D H-mode flat-top, cutaway | Plasma sliced open: Tₑ on the engine's flux surfaces |
+| ![Field lines](docs/screenshots/diiid-field-lines.png) | ![CENTAUR](docs/screenshots/centaur-section.png) |
+| Field lines on the boundary, pitch from q₉₅ | CENTAUR negative-triangularity, double null |
+| ![Disruption](docs/screenshots/diiid-density-limit-disruption.png) | ![Density](docs/screenshots/diiid-section-ne.png) |
+| Density-limit preset: locked mode ahead of the quench | nₑ colouring |
+
+- **The whole machine in three.js:** vessel/first wall revolved from each
+  device's own wall contour (DIII-D, JET, ITER, CENTAUR), divertor region,
+  and schematic TF coils, central solenoid and PF coils sized from the wall.
+- **The plasma follows the live equilibrium.** The engine's flux-surface
+  contours (ψ_N = 0.1 … 0.9 and 0.995) are resampled onto a fixed angular grid
+  and swept around the torus on the GPU, so the shape tracks ramp-up, the
+  limited-to-diverted transition, shaping changes and ramp-down.
+- **Colour and brightness come from the engine's profiles:** Tₑ or nₑ per
+  surface, brightness ∝ nₑ²√Tₑ. The edge glows with the synthetic D-alpha
+  signal, ELMs flash the outboard edge, divertor strike rings brighten with the
+  computed peak heat flux, and a disruption shows its locked-mode / thermal
+  quench / current quench sequence.
+- **Explore:** orbit/zoom/pan, W A S D / Q E fly, preset cameras (overview,
+  tangential, poloidal section, top), a cutaway toggle, a "slice plasma" toggle
+  that exposes the nested flux surfaces, optional field lines, and a HUD with
+  live parameters, event banners and a post-pulse replay slider.
+- **Performance:** geometry is built once per device. Each tick uploads one
+  11 × 128 float texture of (R, Z) samples; the vertex shader does the
+  revolution. The render loop pauses when the tab is hidden.
+
+### Run it
+
+The compiled WASM engine is checked in (`web/src/wasm/`), so the frontend runs
+without a Rust toolchain:
+
+```bash
+cd web
+npm install
+npm run dev          # http://localhost:5173, then pick a device and Run
+# or open http://localhost:5173/run/diiid?view=explore&autostart=1
+```
+
+To rebuild the engine too, use `./build.sh` (needs Rust, the
+`wasm32-unknown-unknown` target and wasm-pack; see Getting Started below).
+
+### What is physics and what is decoration
+
+The in-app "what's physical?" note gives the same list.
+
+- **From the engine:** flux-surface shapes, magnetic axis, X-points,
+  separatrix, Tₑ/nₑ profiles, H/L mode, ELM timing and size (`elm_active`,
+  `elm_energy_loss`), D-alpha, disruption state and risk, f_GW, q₉₅, and the
+  other HUD values. P_fus/Q and the divertor q_peak come from the upstream
+  display-side models in `web/src/lib/fusionPhysics.ts`.
+- **Assumptions:** profiles are indexed by ρ, and surfaces are coloured using
+  ρ ≈ √ψ_N. Brightness ∝ nₑ²√Tₑ (bremsstrahlung scaling) is a relative proxy,
+  not a synthetic camera image. Field lines use the geometric poloidal angle,
+  so they show the right number of transits but not the exact local pitch.
+- **Schematic or decorative:** TF/CS/PF coil geometry (the engine has no coil
+  model; TF counts are the real machines' 24/32/18, CENTAUR's is
+  illustrative), divertor shading, plasma-coloured wall lighting, the ELM flash
+  shape and decay, the disruption afterglow, and the near-camera fade.
+
+### Code
+
+`web/src/components/exploration/`: `scene.ts` (three.js scene, camera, cutaway,
+render loop), `fluxGeometry.ts` (contour → fixed-grid resampling, with
+`fluxGeometry.test.ts`), `plasmaVolume.ts` (shell shaders and cut faces),
+`edge.ts` (X-points, strike rings, field lines), `machine.ts` (hardware), and
+`Hud.tsx`. It follows the upstream port view's approach (plain three.js, not
+react-three-fiber) and reuses its bloom pipeline and strike-point finder. The
+only change to existing code is the view switch (plus `?autostart=1`) in
+`web/src/pages/ControlRoom.tsx`.
+
+---
+
+*Original README follows.*
+
+## fusionsimulator.io
 
 A real-time tokamak plasma simulator that runs entirely in your browser.
 fusionsimulator.io combines a Rust physics engine (compiled to WebAssembly) with a
@@ -55,8 +149,8 @@ For complete citations and equations, see the in-app Bibliography page.
 
 ```bash
 # Clone the repository
-git clone <repo-url>
-cd fusion-sim
+git clone <repo-url> fusion-sim-3d
+cd fusion-sim-3d
 
 # Full build (WASM engine + frontend)
 ./build.sh
@@ -86,6 +180,9 @@ The dev server runs at `http://localhost:5173` by default.
 ### Running Tests
 
 ```bash
+# Exploration Room geometry tests (standalone, like the upstream TS test)
+cd web && npx tsx src/components/exploration/fluxGeometry.test.ts
+
 # Rust physics engine tests
 cargo test -p tok-sym-core
 
@@ -171,7 +268,8 @@ divertor heat flux via Bosch-Hale and Eich scaling).
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+GPL-3.0. See [LICENSE](LICENSE). (Upstream's README said MIT at the time of
+the fork, but its LICENSE file is GPL-3.0; this fork follows the LICENSE file.)
 
 ## Attribution
 
