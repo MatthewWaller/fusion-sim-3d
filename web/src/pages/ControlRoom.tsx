@@ -8,6 +8,7 @@ import UnifiedTracePanel from '../components/UnifiedTracePanel'
 import StatusPanel from '../components/StatusPanel'
 import PulsePlanner from '../components/PulsePlanner'
 import PortView from '../components/portview'
+import ExplorationRoom from '../components/exploration'
 import SettingsDropdown from '../components/SettingsDropdown'
 import TutorialOverlay from '../components/TutorialOverlay'
 import { DIIID_LIMITER } from '../lib/diiid-geometry'
@@ -39,9 +40,22 @@ function getPresets(deviceId: string): { id: PresetId; label: string }[] {
 
 export default function ControlRoom() {
   const { deviceId: routeDeviceId } = useParams<{ deviceId: string }>()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const routePreset = (searchParams.get('preset') || 'hmode') as PresetId
   const showTutorial = searchParams.get('tutorial') === 'true'
+  // Which room is showing: the 2D control room or the 3D Exploration Room.
+  // Kept in the URL (?view=explore) so the 3D room can be linked directly.
+  // Both rooms read the same live simulation, so switching never resets it.
+  const view: 'control' | 'explore' = searchParams.get('view') === 'explore' ? 'explore' : 'control'
+  const autostart = searchParams.get('autostart') === '1'
+  const setView = (v: 'control' | 'explore') => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (v === 'explore') next.set('view', 'explore')
+      else next.delete('view')
+      return next
+    }, { replace: true, state: location.state })
+  }
 
   // A programme edited on the pulse page arrives as router state.
   const location = useLocation()
@@ -87,6 +101,12 @@ export default function ControlRoom() {
   useEffect(() => {
     if (!handoff) return
     controls.runProgram(activeDevice, handoff.programJson)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ?autostart=1 starts the pulse on load (demo links, screenshots). Not
+  // ref-guarded for the same StrictMode reason as the hand-off above.
+  useEffect(() => {
+    if (autostart) controls.start()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Set initial fuel type for devices that default to DT
@@ -304,8 +324,26 @@ export default function ControlRoom() {
           </button>
         </div>
 
-        {/* Time readout + Settings */}
+        {/* Time readout + room switch + Settings */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0 justify-self-end col-start-2 row-start-1 md:col-start-3">
+          {/* Room switch: 2D control room vs 3D Exploration Room */}
+          <div className="flex rounded overflow-hidden border border-gray-700" role="group" aria-label="View">
+            {([['control', 'Control', 'Control room'], ['explore', '3D', 'Exploration Room (3D)']] as const).map(([v, short, title]) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                title={title}
+                aria-pressed={view === v}
+                className={`px-1.5 sm:px-2 py-1 text-sm font-medium transition-colors cursor-pointer
+                  ${view === v
+                    ? 'bg-cyan-700 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                  }`}
+              >
+                {v === 'explore' ? <><span className="sm:hidden">{short}</span><span className="hidden sm:inline">Exploration</span></> : short}
+              </button>
+            ))}
+          </div>
           <div className="text-xs text-gray-400 whitespace-nowrap">
             t=<span className="font-mono tabular-nums">{time.toFixed(3)}</span>s
             {' / '}
@@ -330,7 +368,23 @@ export default function ControlRoom() {
         />
       </div>
 
-      {/* ─── Main grid ─── */}
+      {/* ─── Exploration Room (3D) ─── */}
+      {view === 'explore' && (
+        <div className="flex-1 min-h-0">
+          <ExplorationRoom
+            snapshot={displaySnapshot}
+            device={devices.find(d => d.id === activeDevice)}
+            limiterPoints={limiterPoints}
+            finished={finished}
+            scrubTime={scrubTime}
+            duration={duration}
+            onScrub={controls.setScrubTime}
+          />
+        </div>
+      )}
+
+      {/* ─── Main grid (control room) ─── */}
+      {view === 'control' && (
       <div className="flex-1 min-h-0 overflow-x-auto">
       {/* Balanced 2x3: equilibrium top-left, traces across the top right,
           status spanning the bottom under the equilibrium, port view bottom
@@ -383,6 +437,7 @@ export default function ControlRoom() {
         </div>
       </div>
       </div>
+      )}
 
       {/* ─── Pulse Planner drawer ─── */}
       {showPlanner && (
@@ -402,7 +457,7 @@ export default function ControlRoom() {
       )}
 
       {/* ─── Tutorial overlay ─── */}
-      {tutorialActive && (
+      {tutorialActive && view === 'control' && (
         <TutorialOverlay onComplete={() => setTutorialActive(false)} />
       )}
     </div>
