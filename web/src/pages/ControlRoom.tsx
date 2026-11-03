@@ -187,12 +187,6 @@ export default function ControlRoom() {
     controls.runProgram(activeDevice, handoff.programJson)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ?autostart=1 starts the pulse on load (demo links, screenshots). Not
-  // ref-guarded for the same StrictMode reason as the hand-off above.
-  useEffect(() => {
-    if (autostart) controls.start()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   // Set initial fuel type for devices that default to DT
   useEffect(() => {
     const fuel = defaultFuel(activeDevice)
@@ -200,6 +194,14 @@ export default function ControlRoom() {
       controls.setMassNumber(2.5)
     }
   }, [activeDevice]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ?autostart=1 starts the pulse on load (demo links, screenshots). Not
+  // ref-guarded for the same StrictMode reason as the hand-off above. It runs
+  // after the default-fuel effect, whose mass-number change resets the
+  // simulation: started before it, a DT device (JET, ITER) came up idle.
+  useEffect(() => {
+    if (autostart) controls.start()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const time = displaySnapshot?.time ?? 0
   // Extract duration from snapshot, or fall back to the program's duration
