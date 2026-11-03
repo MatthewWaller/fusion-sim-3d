@@ -198,6 +198,15 @@ export default function Phone({ ctx }: { ctx: ControlRoomContext }) {
       </section>
 
       {/* ── 06 R-Z map beside 12 port view ── */}
+      {ctx.view === 'explore' ? (
+        <section className="app-pair app-pair-3d">
+          <div className="ap-tile ap-3d">
+            {ctx.explorationNode({ readout: false, replay: false, compact: true })}
+            <div className="ap-plot-title">3D <span className="ap-unit">EXPLORATION</span></div>
+            <div className="ap-plot-num">06</div>
+          </div>
+        </section>
+      ) : (
       <section className="app-pair">
         <div className="ap-tile ap-map app-eq" data-tutorial="equilibrium">
           <EquilibriumCanvas snapshot={s} wallJson={ctx.wallJson} limiterPoints={ctx.limiterPoints} />
@@ -218,6 +227,7 @@ export default function Phone({ ctx }: { ctx: ControlRoomContext }) {
           <div className="ap-plot-num">12</div>
         </div>
       </section>
+      )}
 
       {/* ── 15 telemetry CRT ── */}
       <section className="ap-console app-tele">
@@ -342,6 +352,7 @@ export default function Phone({ ctx }: { ctx: ControlRoomContext }) {
           <PickKey className="app-speed" value={String(ctx.activeSpeed)} caption={`SPEED ${speedText(ctx.activeSpeed)}`}
             options={SPEEDS.map((sp) => ({ id: String(sp), label: speedText(sp) }))} onChange={(sp) => ctx.onSpeedChange(Number(sp))} />
           <LampKey caption={ctx.hasCustomProgram ? 'EDIT*' : 'EDIT'} lamp={ctx.showPlanner ? 'white' : 'off'} onClick={ctx.togglePlanner} />
+          <LampKey caption="3D" lamp={ctx.view === 'explore' ? 'white' : 'off'} onClick={() => ctx.onViewChange(ctx.view === 'explore' ? 'control' : 'explore')} />
         </div>
       </div>
 

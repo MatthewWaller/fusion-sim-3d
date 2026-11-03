@@ -235,6 +235,8 @@ function Desktop({ ctx }: { ctx: ControlRoomContext }) {
           {ctx.devices.map((d) => (
             <LampKey key={d.id} caption={d.name.toUpperCase()} lamp={ctx.activeDevice === d.id ? 'white' : 'off'} onClick={() => ctx.onDeviceChange(d.id)} />
           ))}
+          <span className="ap-engr ap-engr-r">VIEW</span>
+          <LampKey caption="3D" lamp={ctx.view === 'explore' ? 'white' : 'off'} onClick={() => ctx.onViewChange(ctx.view === 'explore' ? 'control' : 'explore')} />
         </div>
         <div className="ap-ctl-row ap-ctl-row-6">
           <span className="ap-engr">SCENARIO</span>
@@ -262,6 +264,14 @@ function Desktop({ ctx }: { ctx: ControlRoomContext }) {
 
       {/* ── 06–13 big board ── */}
       <section className="ap-board">
+        {ctx.view === 'explore' ? (
+          /* the 3D room takes the R-Z map and the plot stack; port view, log and console stay */
+          <div className="ap-tile ap-3d">
+            {ctx.explorationNode({ readout: false })}
+            <div className="ap-plot-title">3D <span className="ap-unit">EXPLORATION</span></div>
+            <div className="ap-plot-num">06</div>
+          </div>
+        ) : (<>
         <div className="ap-tile ap-map" data-tutorial="equilibrium">
           <EquilibriumCanvas snapshot={s} wallJson={ctx.wallJson} limiterPoints={ctx.limiterPoints} />
           <div className="ap-plot-title">R-Z <span className="ap-unit">M</span></div>
@@ -286,6 +296,7 @@ function Desktop({ ctx }: { ctx: ControlRoomContext }) {
             />
           ))}
         </div>
+        </>)}
         <div className="ap-right">
           <div className="ap-tile ap-port" data-tutorial="portview">
             <PortView

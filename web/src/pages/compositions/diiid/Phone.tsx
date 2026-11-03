@@ -128,6 +128,12 @@ export default function Phone({ ctx }: { ctx: ControlRoomContext }) {
         ))}
       </div>
 
+      {ctx.view === 'explore' ? (
+        <div className="dc-tile dcp-3d">
+          {ctx.explorationNode({ readout: false, replay: false, compact: true })}
+          <span className="dc-tile-title">EXPLORE 3D</span>
+        </div>
+      ) : (
       <div className="dcp-pair">
         <div className="dc-tile dc-eq" data-tutorial="equilibrium">
           <EquilibriumCanvas snapshot={snap} wallJson={ctx.wallJson} limiterPoints={ctx.limiterPoints} />
@@ -142,6 +148,7 @@ export default function Phone({ ctx }: { ctx: ControlRoomContext }) {
           <span className="dc-tile-title">TV TANGENTIAL</span>
         </div>
       </div>
+      )}
 
       <section className="dcp-green" data-tutorial="status">
         <PhoneBars d={diag} pfus={pfus} q={q} />
@@ -227,6 +234,7 @@ export default function Phone({ ctx }: { ctx: ControlRoomContext }) {
           <PickWord className="dc-key dcp-key dcp-speed" value={String(ctx.activeSpeed)} label={`SPEED ${speedText(ctx.activeSpeed)}`}
             options={SPEEDS.map((v) => ({ id: String(v), label: speedText(v) }))} onChange={(v) => ctx.onSpeedChange(Number(v))} />
           <button className="dc-key dcp-key" data-on={ctx.showPlanner} onClick={ctx.togglePlanner}>EDIT{ctx.hasCustomProgram ? '*' : ''}</button>
+          <button className="dc-key dcp-key dcp-3dkey" data-on={ctx.view === 'explore'} aria-pressed={ctx.view === 'explore'} onClick={() => ctx.onViewChange(ctx.view === 'explore' ? 'control' : 'explore')}>3D</button>
         </div>
       </div>
 

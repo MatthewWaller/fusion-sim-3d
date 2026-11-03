@@ -63,4 +63,16 @@ export interface ControlRoomContext {
   settingsNode: ReactNode
   /** The tutorial overlay element, or null when inactive. */
   tutorialNode: ReactNode
+
+  // ── 3D Exploration Room ──
+  /** Which room is showing; kept in the URL as ?view=explore. */
+  view: 'control' | 'explore'
+  onViewChange: (v: 'control' | 'explore') => void
+  /**
+   * The 3D room, sized to fill its parent. `readout: false` hides its own
+   * parameter panel and `replay: false` its post-pulse scrub bar, for looks
+   * that already show those beside it; `compact` folds its view controls
+   * for phone layouts.
+   */
+  explorationNode: (opts?: { readout?: boolean; replay?: boolean; compact?: boolean }) => ReactNode
 }

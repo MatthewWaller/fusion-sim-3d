@@ -109,6 +109,7 @@ export default function Composition({ ctx }: { ctx: ControlRoomContext }) {
         </label>
         <span className="jet-sep" />
         <button className={`jet-btn${ctx.showPlanner ? ' down' : ''}`} onClick={ctx.togglePlanner}>Edit</button>
+        <button className={`jet-btn${ctx.view === 'explore' ? ' down' : ''}`} aria-pressed={ctx.view === 'explore'} onClick={() => ctx.onViewChange(ctx.view === 'explore' ? 'control' : 'explore')}>3D View</button>
         <span className="jet-sep" />
         <label>Device
           <select value={ctx.activeDevice} onChange={(e) => ctx.onDeviceChange(e.target.value)}>
@@ -168,6 +169,15 @@ export default function Composition({ ctx }: { ctx: ControlRoomContext }) {
           </div>
         </div>
 
+        {ctx.view === 'explore' ? (
+          /* the 3D room replaces the two jScope windows; the interlock table, equilibrium, camera and log stay */
+          <div className="jet-col-mid">
+            <div className="jet-panel jet-panel-3d">
+              <div className="jet-title">Camera  3D  exploration  #{ctx.pulseNumber ?? '-'}</div>
+              <div className="jet-3d">{ctx.explorationNode({ readout: false })}</div>
+            </div>
+          </div>
+        ) : (
         <div className="jet-col-mid" data-tutorial="traces">
           <div className="jet-panel jet-panel-scope">
             <div className="jet-title">jScope  PLASMA  #{ctx.pulseNumber ?? '-'}</div>
@@ -196,6 +206,7 @@ export default function Composition({ ctx }: { ctx: ControlRoomContext }) {
             />
           </div>
         </div>
+        )}
 
         <div className="jet-col-right">
           <div className="jet-panel jet-panel-cam" data-tutorial="portview">

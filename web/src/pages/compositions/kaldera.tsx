@@ -134,10 +134,21 @@ export default function Composition({ ctx }: { ctx: ControlRoomContext }) {
             <Link on={ctx.showPlanner} onClick={ctx.togglePlanner}>EDIT{ctx.hasCustomProgram ? ' *' : ''}</Link>
             <Link onClick={ctx.controls.reset}>RESET</Link>
           </span>
+          <span className="kd-group" role="group" aria-label="View">
+            <Link on={ctx.view === 'control'} onClick={() => ctx.onViewChange('control')}>CONTROL</Link>
+            <Link on={ctx.view === 'explore'} onClick={() => ctx.onViewChange('explore')}>3D</Link>
+          </span>
           <span className="kd-settings">{ctx.settingsNode}</span>
         </div>
       </nav>
 
+      {ctx.view === 'explore' ? (
+        /* 3D Exploration Room: takes the plasma/equilibrium/port row and the strips; nav, timeline and footer stay */
+        <section className="kd-explore">
+          <div className="kd-head"><span className="kd-num">04</span> . EXPLORATION . 3D <span className="kd-dot">.</span> <span className="kd-explore-sub">{pulseNo} <span className="kd-dot">.</span> {phase} <span className="kd-dot">.</span> {stateWord}</span></div>
+          <div className="kd-explore-box">{ctx.explorationNode({ replay: false })}</div>
+        </section>
+      ) : (<>
       <main className="kd-main">
         <div className="kd-rule kd-rule-1" aria-hidden="true" />
         <div className="kd-rule kd-rule-2" aria-hidden="true" />
@@ -206,6 +217,7 @@ export default function Composition({ ctx }: { ctx: ControlRoomContext }) {
         hot={hot}
         onHot={setHot}
       />
+      </>)}
 
       <Timeline
         stations={stations}

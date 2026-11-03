@@ -35,6 +35,10 @@ export default function Console({ ctx }: { ctx: ControlRoomContext }) {
           ))}
         </>
       )}
+      <span className="dc-sep" />
+      <span className="dc-label">VIEW</span>
+      <button className="dc-key" data-on={ctx.view === 'control'} aria-pressed={ctx.view === 'control'} onClick={() => ctx.onViewChange('control')}>CONTROL</button>
+      <button className="dc-key" data-on={ctx.view === 'explore'} aria-pressed={ctx.view === 'explore'} onClick={() => ctx.onViewChange('explore')}>3D</button>
       <span className="dc-fill" />
       <span className="dc-settings">{ctx.settingsNode}</span>
     </div>

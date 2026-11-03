@@ -63,6 +63,15 @@ function Desktop({ ctx }: { ctx: ControlRoomContext }) {
 
   return (
     <div data-layout="diiid" className="dc-root">
+      {ctx.view === 'explore' ? (
+        /* the 3D room takes the whole chart wall; the clock, status block and TV camera stay */
+        <div className="dc-wall dc-wall-3d">
+          <div className="dc-tile dc-3d">
+            {ctx.explorationNode({ readout: false })}
+            <span className="dc-tile-title">EXPLORE 3D</span>
+          </div>
+        </div>
+      ) : (
       <div className="dc-wall" data-tutorial="traces">
         <div className="dc-tile dc-eq" data-tutorial="equilibrium">
           <EquilibriumCanvas snapshot={snap} wallJson={ctx.wallJson} limiterPoints={ctx.limiterPoints} />
@@ -83,6 +92,7 @@ function Desktop({ ctx }: { ctx: ControlRoomContext }) {
           />
         ))}
       </div>
+      )}
 
       <div className="dc-side">
         <div className="dc-clock">

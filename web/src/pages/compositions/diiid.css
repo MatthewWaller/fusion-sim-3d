@@ -312,3 +312,28 @@ html[data-theme="diiid"] body { background: #000; }
   [data-layout="diiid"][data-phone] .dcp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   [data-layout="diiid"][data-phone] .dcp-chan { grid-template-columns: repeat(8, minmax(0, 1fr)); }
 }
+
+/* ── 3D Exploration Room ──────────────────────────── */
+/* one black tile filling the chart wall, titled like the others */
+[data-layout="diiid"] .dc-wall-3d { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+[data-layout="diiid"] .dc-3d .dc-tile-title { z-index: 1; }
+[data-layout="diiid"][data-phone] .dcp-3d { height: min(100vw, 56vh); border-bottom: 2px solid var(--dc-bezel); }
+[data-layout="diiid"][data-phone] .dcp-3d .dc-tile-title { z-index: 1; }
+
+/* the room's chrome on this wall: pure black, hard corners, Courier, yellow-on for active keys */
+[data-layout="diiid"] .x-room {
+  --x-canvas: #000000;
+  --x-panel-bg: rgba(0, 0, 0, 0.82);
+  --x-line: #333333;
+  --x-ink: #ffffff; --x-ink-dim: #c0c0c0; --x-ink-faint: #909090;
+  --x-ok: #00ff00; --x-warn: #ffff00; --x-bad: #ff6060;
+  --x-on-bg: #e0d000; --x-on-line: #e0d000; --x-on-ink: #000000;
+  --x-off-bg: #101010; --x-off-line: #333333; --x-off-ink: #dddddd; --x-hover-ink: #ffffff;
+  --x-track: #1c1c1c;
+  --x-radius: 0; --x-control-radius: 0;
+  --x-font: var(--dc-mono); --x-mono: var(--dc-mono);
+  --x-caps: uppercase; --x-track-ls: 0.06em;
+  --x-blur: 0px;
+}
+[data-layout="diiid"] .x-room .x-toggle { font-weight: 700; }
+[data-layout="diiid"][data-phone] .dcp-keyrow .dcp-3dkey { flex: 0.6 1 0; }

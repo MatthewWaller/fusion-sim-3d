@@ -293,8 +293,8 @@ export default function ControlRoom() {
     />
   ) : null
 
-  // Room switch: 2D control room vs 3D Exploration Room. Shown in the classic
-  // top bar and next to the settings menu in every composition.
+  // Room switch for the classic page: 2D control room vs 3D Exploration Room.
+  // Each composition draws its own switch in its own style from ctx.view.
   const viewSwitchNode = (
     <div className="flex shrink-0 rounded overflow-hidden border border-gray-700" role="group" aria-label="View">
       {([['control', 'Control', 'Control room'], ['explore', '3D', 'Exploration Room (3D)']] as const).map(([v, short, title]) => (
@@ -315,9 +315,25 @@ export default function ControlRoom() {
     </div>
   )
 
-  // The 3D room has no composition of its own: in explore view every layout
-  // falls through to the classic page, whose top bar carries the switch back.
-  if (LayoutComponent && view === 'control') {
+  // The 3D Exploration Room, ready for a composition to place in its own frame.
+  // Looks keep their own readouts and timeline beside it, so they pass
+  // readout/replay off; the classic page below shows the HUD's own.
+  const explorationNode = (opts?: { readout?: boolean; replay?: boolean; compact?: boolean }) => (
+    <ExplorationRoom
+      snapshot={displaySnapshot}
+      device={devices.find(d => d.id === activeDevice)}
+      limiterPoints={limiterPoints}
+      finished={finished}
+      scrubTime={scrubTime}
+      duration={duration}
+      onScrub={controls.setScrubTime}
+      readout={opts?.readout}
+      replay={opts?.replay}
+      compact={opts?.compact}
+    />
+  )
+
+  if (LayoutComponent) {
     const ctx: ControlRoomContext = {
       state, controls: roomControls, displaySnapshot, history, running, finished, scrubTime, wallJson, programJson,
       events, pulseNumber, previousPulse, report, plasmaSnapshot, limiterPoints, usesIch,
@@ -327,13 +343,9 @@ export default function ControlRoom() {
       fuelType, showsFuelToggle: activeDevice === 'jet' || activeDevice === 'iter', onFuelChange: handleFuelChange,
       activeSpeed, onSpeedChange: handleSpeedChange, hasCustomProgram,
       showPlanner, togglePlanner: () => setShowPlanner((v) => !v), plannerNode,
-      settingsNode: (
-        <span className="inline-flex items-center gap-1 sm:gap-2">
-          {viewSwitchNode}
-          <SettingsDropdown onRestartTutorial={() => setTutorialActive(true)} layoutLock={layoutLock} />
-        </span>
-      ),
-      tutorialNode: tutorialActive ? <TutorialOverlay onComplete={() => setTutorialActive(false)} /> : null,
+      view, onViewChange: setView, explorationNode,
+      settingsNode: <SettingsDropdown onRestartTutorial={() => setTutorialActive(true)} layoutLock={layoutLock} />,
+      tutorialNode: tutorialActive && view === 'control' ? <TutorialOverlay onComplete={() => setTutorialActive(false)} /> : null,
     }
     return (
       <>
@@ -512,15 +524,7 @@ export default function ControlRoom() {
       {/* ─── Exploration Room (3D) ─── */}
       {view === 'explore' && (
         <div className="flex-1 min-h-0">
-          <ExplorationRoom
-            snapshot={displaySnapshot}
-            device={devices.find(d => d.id === activeDevice)}
-            limiterPoints={limiterPoints}
-            finished={finished}
-            scrubTime={scrubTime}
-            duration={duration}
-            onScrub={controls.setScrubTime}
-          />
+          {explorationNode()}
         </div>
       )}
 

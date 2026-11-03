@@ -344,3 +344,29 @@ html[data-theme="jet"] body { background: #ffffff; color: #000000; }
   [data-layout="jet"][data-phone] .jp-pair { grid-template-columns: minmax(0, 1fr) 220px; }
   [data-layout="jet"][data-phone] .jp-chan { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 }
+
+/* ── 3D Exploration Room ──────────────────────────── */
+/* one panel in place of the two jScope windows, titled like the camera beside it */
+[data-layout="jet"] .jet-panel-3d { flex: 1; }
+[data-layout="jet"] .jet-3d { position: relative; flex: 1; min-height: 0; }
+[data-layout="jet"][data-phone] .jp-3d { margin: 0 -1px; border-top: 0; }
+[data-layout="jet"][data-phone] .jp-3d .jet-3d { flex: none; height: min(100vw, 56vh); }
+
+/* the room's chrome in this look: a dark camera feed under white Win95 panels and bevelled buttons */
+[data-layout="jet"] .x-room {
+  --x-canvas: #0c0e12;
+  --x-panel-bg: #ffffff;
+  --x-line: #000000;
+  --x-ink: #000000; --x-ink-dim: #202020; --x-ink-faint: #555555;
+  --x-ok: var(--jet-green); --x-warn: #b07800; --x-bad: var(--jet-red);
+  --x-on-bg: #c8c4bc; --x-on-line: #404040; --x-on-ink: #000000;
+  --x-off-bg: var(--jet-gray); --x-off-line: #404040; --x-off-ink: #000000; --x-hover-ink: #000000;
+  --x-track: #e4e4e4;
+  --x-radius: 0; --x-control-radius: 0;
+  --x-font: var(--jet-sans); --x-mono: var(--jet-mono);
+  --x-caps: none; --x-track-ls: normal;
+  --x-blur: 0px;
+}
+[data-layout="jet"] .x-room .x-toggle { font-size: 11px; border-color: #fff #404040 #404040 #fff; padding: 1px 8px; }
+[data-layout="jet"] .x-room .x-toggle[aria-pressed="true"] { border-color: #404040 #fff #fff #404040; }
+[data-layout="jet"] .x-room .x-banner { color: #000; }

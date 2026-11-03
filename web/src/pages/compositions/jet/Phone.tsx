@@ -125,6 +125,12 @@ export default function Phone({ ctx, words, configCode }: { ctx: ControlRoomCont
         ))}
       </div>
 
+      {ctx.view === 'explore' ? (
+        <div className="jet-panel jp-3d">
+          <div className="jet-title">Camera  3D  exploration</div>
+          <div className="jet-3d">{ctx.explorationNode({ readout: false, replay: false, compact: true })}</div>
+        </div>
+      ) : (
       <div className="jp-pair">
         <div className="jet-panel jet-panel-eq" data-tutorial="equilibrium">
           <div className="jet-title">Equilibrium  R-Z  {plasma ? (s?.is_limited ? 'LIMITED' : configCode(s?.magnetic_config)) : ''}</div>
@@ -140,6 +146,7 @@ export default function Phone({ ctx, words, configCode }: { ctx: ControlRoomCont
           </div>
         </div>
       </div>
+      )}
 
       <div className="jet-panel jp-table" data-tutorial="status">
         <div className="jet-title">{dev?.name ?? ''} scalars / interlocks</div>
@@ -244,6 +251,7 @@ export default function Phone({ ctx, words, configCode }: { ctx: ControlRoomCont
           <Combo className="jp-key jp-speed" title="Speed" value={String(ctx.activeSpeed)} text={`Speed ${ctx.activeSpeed}x`}
             options={SPEEDS.map((v) => ({ id: String(v), label: `${v}x` }))} onChange={(v) => ctx.onSpeedChange(Number(v))} />
           <button className={`jet-btn jp-key${ctx.showPlanner ? ' down' : ''}`} onClick={ctx.togglePlanner}>Edit{ctx.hasCustomProgram ? ' *' : ''}</button>
+          <button className={`jet-btn jp-key${ctx.view === 'explore' ? ' down' : ''}`} aria-pressed={ctx.view === 'explore'} onClick={() => ctx.onViewChange(ctx.view === 'explore' ? 'control' : 'explore')}>3D</button>
         </div>
       </div>
 

@@ -395,3 +395,33 @@ html[data-theme="kaldera"] body { background: #0a0d14; }
   [data-layout="kaldera"][data-phone] .kd-ph-portcol { align-items: center; }
   [data-layout="kaldera"][data-phone] .kd-ph-portcol .kd-ph-paircap { width: var(--kd-pw); }
 }
+
+/* ── 3D Exploration Room ──────────────────────────────────────────── */
+/* takes the main row and the strips row; the timeline and footer stay underneath */
+[data-layout="kaldera"] .kd-explore { grid-row: 2 / span 2; min-height: 0; display: flex; flex-direction: column; padding: 8px var(--kd-x) 12px; }
+[data-layout="kaldera"] .kd-explore-sub { color: rgba(255,255,255,0.85); }
+[data-layout="kaldera"] .kd-explore-box { position: relative; flex: 1; min-height: 0; border: 1px solid rgba(255,255,255,0.12); }
+[data-layout="kaldera"][data-phone] .kd-ph-viewrow { display: flex; justify-content: flex-end; gap: 4px; margin: -6px -6px 2px; }
+[data-layout="kaldera"][data-phone] .kd-ph-explore { padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,0.12); }
+[data-layout="kaldera"][data-phone] .kd-ph-explorebox { position: relative; height: min(100vw, 56vh); border: 1px solid rgba(255,255,255,0.12); }
+
+/* the room's chrome in this look: the same blue-black field, hairlines, white caps */
+[data-layout="kaldera"] .x-room {
+  --x-canvas: #0a0d14;
+  --x-panel-bg: rgba(10, 13, 20, 0.72);
+  --x-line: rgba(255, 255, 255, 0.14);
+  --x-ink: #ffffff; --x-ink-dim: rgba(255,255,255,0.72); --x-ink-faint: rgba(255,255,255,0.5);
+  --x-ok: #8fc9a0; --x-warn: #e0b36a; --x-bad: #e0695a;
+  --x-on-bg: #ffffff; --x-on-line: #ffffff; --x-on-ink: #0a0d14;
+  --x-off-bg: transparent; --x-off-line: rgba(255,255,255,0.18); --x-off-ink: rgba(255,255,255,0.78); --x-hover-ink: #ffffff;
+  --x-track: rgba(255,255,255,0.12);
+  --x-radius: 0; --x-control-radius: 0;
+  --x-font: var(--kd-caps); --x-mono: var(--kd-wide);
+  --x-caps: uppercase; --x-track-ls: var(--kd-caps-track);
+  --x-blur: 6px;
+  text-transform: none; letter-spacing: 0.04em; font-size: 10px;
+}
+/* the look resets every button inside it; give the room's toggles their frame back */
+[data-layout="kaldera"] .x-room .x-toggle { padding: 4px 6px; border: 1px solid var(--x-off-line); font-size: 9px; }
+[data-layout="kaldera"] .x-room .x-toggle[aria-pressed="true"] { border-color: var(--x-on-line); }
+[data-layout="kaldera"] .x-room .x-hud { font-size: 10px; }

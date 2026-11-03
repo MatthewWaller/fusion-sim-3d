@@ -196,6 +196,17 @@ export default function Phone({ ctx, view }: { ctx: ControlRoomContext; view: Ph
         )}
       </div>
 
+      <div className="kd-ph-viewrow" role="group" aria-label="View">
+        <button className="kd-ph-word" data-on={ctx.view === 'control'} aria-pressed={ctx.view === 'control'} onClick={() => ctx.onViewChange('control')}>CONTROL</button>
+        <button className="kd-ph-word" data-on={ctx.view === 'explore'} aria-pressed={ctx.view === 'explore'} onClick={() => ctx.onViewChange('explore')}>3D</button>
+      </div>
+
+      {ctx.view === 'explore' ? (
+        <section className="kd-ph-explore">
+          <div className="kd-ph-paircap">EXPLORATION . 3D</div>
+          <div className="kd-ph-explorebox">{ctx.explorationNode({ readout: false, replay: false, compact: true })}</div>
+        </section>
+      ) : (
       <section className="kd-ph-pair">
         <div className="kd-ph-eq" data-tutorial="equilibrium">
           <div className="kd-ph-paircap">
@@ -222,6 +233,7 @@ export default function Phone({ ctx, view }: { ctx: ControlRoomContext; view: Ph
           </div>
         </div>
       </section>
+      )}
 
       <section className="kd-ph-status" data-tutorial="status">
         <Diagnostics snapshot={s} valid={valid} compact />
