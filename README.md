@@ -11,9 +11,21 @@
 
 ## What this fork adds: the 3D Exploration Room
 
-A second view next to the control room (top bar: **Control | Exploration**, or
-`/run/<device>?view=explore`). Both views read the same live simulation, so you
-can switch mid-pulse without resetting anything.
+A second view next to the control room, or `/run/<device>?view=explore`. Both
+views read the same live simulation, so you can switch mid-pulse without
+resetting anything. Every control-room look has its own switch and frames the
+3D room in its own style, keeping that look's readouts and controls beside it:
+
+| Look | Switch | What the 3D room replaces |
+|---|---|---|
+| Modern | **CONTROL / 3D** in the top bar | the plasma, equilibrium and port-view row and the strip charts (timeline and event line stay) |
+| DIII-D | **VIEW: CONTROL / 3D** keys on the console | the strip-chart wall (shot clock, status block and TV camera stay) |
+| Apollo | **VIEW 3D** lamp key on the control module | the R-Z map and plot stack (port view, log and console stay) |
+| JET | **3D View** toolbar button | the two jScope windows (interlock table, equilibrium, camera and log stay) |
+| Classic (`?layout=classic`) | **Control / 3D Exploration** in the top bar | the whole control grid |
+
+On phones each look puts a **3D** key in its bottom row (Modern: under the
+state line) and the room takes the equilibrium / port-view pair.
 
 | | |
 |---|---|
