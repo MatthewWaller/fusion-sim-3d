@@ -7,7 +7,7 @@
 > section are Daniel Burgess's work. This fork adds a 3D **Exploration Room**
 > and is maintained by Matthew Waller. Licensed GPL-3.0, like the original.
 
-![Exploration Room: DIII-D H-mode pulse, live](docs/screenshots/exploration-room.gif)
+![Exploration Room in the Modern look: a full DIII-D H-mode pulse, live](docs/screenshots/exploration-room.gif)
 
 ## What this fork adds: the 3D Exploration Room
 
@@ -30,11 +30,11 @@ state line) and the room takes the equilibrium / port-view pair.
 | | |
 |---|---|
 | ![Overview](docs/screenshots/diiid-overview.png) | ![Poloidal section, Te](docs/screenshots/diiid-section-te.png) |
-| DIII-D H-mode flat-top, cutaway | Plasma sliced open: Tₑ on the engine's flux surfaces |
+| Modern look: DIII-D H-mode flat-top, cutaway, an ELM at the edge | DIII-D look: plasma sliced open, Tₑ on the engine's flux surfaces |
 | ![Field lines](docs/screenshots/diiid-field-lines.png) | ![CENTAUR](docs/screenshots/centaur-section.png) |
-| Field lines on the boundary, pitch from q₉₅ | CENTAUR negative-triangularity, double null |
+| Apollo look: field lines on the boundary, pitch from q₉₅ | JET look: CENTAUR negative-triangularity, double null |
 | ![Disruption](docs/screenshots/diiid-density-limit-disruption.png) | ![Density](docs/screenshots/diiid-section-ne.png) |
-| Density-limit preset: locked mode ahead of the quench | nₑ colouring |
+| DIII-D look: density-limit preset, locked mode and thermal quench | Modern look: nₑ colouring |
 
 - **The whole machine in three.js:** vessel/first wall revolved from each
   device's own wall contour (DIII-D, JET, ITER, CENTAUR), divertor region,
