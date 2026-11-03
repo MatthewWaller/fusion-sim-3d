@@ -1,0 +1,58 @@
+/* Exploration Room chrome. Every colour, font and corner the HUD uses is a
+   --x-* token with the classic look's value as its default; a control-room
+   look restyles the 3D room by overriding them under its own wrapper
+   (`.my-wrapper .x-room { ... }`): the defaults sit on .x-room itself, so a
+   plain inherited value from the wrapper would lose to them. */
+.x-room {
+  --x-canvas: #050608;
+  --x-panel-bg: rgb(11 13 18 / 0.8);
+  --x-line: #1f2937;
+  --x-ink: var(--c-ink, #e5e7eb);
+  --x-ink-dim: var(--c-ink-dim, #9ca3af);
+  --x-ink-faint: var(--c-ink-faint, #8b929a);
+  --x-ok: var(--c-ok, #34d399);
+  --x-warn: var(--c-warn, #f59e0b);
+  --x-bad: var(--c-bad-ink, #f87171);
+  --x-on-bg: rgb(14 116 144 / 0.6);
+  --x-on-line: rgb(6 182 212 / 0.6);
+  --x-on-ink: #ffffff;
+  --x-off-bg: rgb(17 24 39 / 0.7);
+  --x-off-line: #374151;
+  --x-off-ink: #9ca3af;
+  --x-hover-ink: #e5e7eb;
+  --x-track: #1f2937;
+  --x-radius: 6px;
+  --x-control-radius: 4px;
+  --x-font: inherit;
+  --x-mono: var(--font-mono, ui-monospace, monospace);
+  --x-caps: none;
+  --x-track-ls: normal;
+  --x-blur: 4px;
+}
+.x-hud { font-family: var(--x-font); }
+.x-mono { font-family: var(--x-mono); font-variant-numeric: tabular-nums; }
+.x-panel {
+  background: var(--x-panel-bg);
+  border-color: var(--x-line);
+  border-radius: var(--x-radius);
+  color: var(--x-ink);
+  backdrop-filter: blur(var(--x-blur));
+}
+.x-panel .uppercase { text-transform: var(--x-caps, uppercase); letter-spacing: var(--x-track-ls); }
+.x-toggle {
+  border-radius: var(--x-control-radius);
+  background: var(--x-off-bg);
+  border-color: var(--x-off-line);
+  color: var(--x-off-ink);
+  text-transform: var(--x-caps);
+  letter-spacing: var(--x-track-ls);
+}
+.x-toggle:hover { color: var(--x-hover-ink); }
+.x-toggle[aria-pressed="true"] { background: var(--x-on-bg); border-color: var(--x-on-line); color: var(--x-on-ink); }
+.x-badge { border-radius: var(--x-control-radius); background: var(--x-off-line); color: var(--x-off-ink); }
+.x-badge[data-on] { background: var(--x-ok); color: var(--x-canvas); }
+.x-track { background: var(--x-track); border-radius: var(--x-control-radius); }
+.x-ramp { border-radius: var(--x-control-radius); }
+.x-banner { border-radius: var(--x-control-radius); }
+.x-range { accent-color: var(--x-on-line); }
+.x-hud sub { font-size: 0.75em; vertical-align: baseline; position: relative; top: 0.3em; text-transform: none; letter-spacing: 0; }

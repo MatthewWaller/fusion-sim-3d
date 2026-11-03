@@ -10,6 +10,7 @@ import type { Device } from '../../lib/wasm'
 import { ExplorationScene, type CameraPreset, type ViewOptions } from './scene'
 import type { ProfileScale } from './plasmaVolume'
 import Hud from './Hud'
+import './exploration.css'
 
 interface Props {
   snapshot: Snapshot | null
@@ -20,11 +21,15 @@ interface Props {
   scrubTime: number | null
   duration: number
   onScrub: (t: number | null) => void
+  /** Passed to the HUD: hide its parameter panel / replay bar when the look provides its own. */
+  readout?: boolean
+  replay?: boolean
+  compact?: boolean
 }
 
 const DEFAULT_OPTIONS: ViewOptions = { cutaway: true, slice: false, nested: true, coils: true, fieldLine: false, colorVar: 'te' }
 
-export default function ExplorationRoom({ snapshot, device, limiterPoints, finished, scrubTime, duration, onScrub }: Props) {
+export default function ExplorationRoom({ snapshot, device, limiterPoints, finished, scrubTime, duration, onScrub, readout, replay, compact }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<ExplorationScene | null>(null)
   const [options, setOptions] = useState<ViewOptions>(DEFAULT_OPTIONS)
@@ -84,7 +89,7 @@ export default function ExplorationRoom({ snapshot, device, limiterPoints, finis
   const onCamera = (p: CameraPreset) => sceneRef.current?.setCameraPreset(p)
 
   return (
-    <div className="relative w-full h-full min-h-0 overflow-hidden bg-[#050608]">
+    <div className="x-room relative w-full h-full min-h-0 overflow-hidden" style={{ background: 'var(--x-canvas)' }}>
       <div ref={containerRef} className="absolute inset-0" data-testid="exploration-canvas" />
       {webglError ? (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-[var(--c-ink-dim)] p-6 text-center">
@@ -102,6 +107,9 @@ export default function ExplorationRoom({ snapshot, device, limiterPoints, finis
           scrubTime={scrubTime}
           duration={duration}
           onScrub={onScrub}
+          readout={readout}
+          replay={replay}
+          compact={compact}
         />
       )}
     </div>

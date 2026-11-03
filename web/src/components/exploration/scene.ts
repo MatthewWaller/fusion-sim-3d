@@ -97,7 +97,13 @@ export class ExplorationScene {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.0
-    renderer.setClearColor(0x050608, 1)
+    renderer.setClearColor(0x000000, 1)
+    // Background from the look's --x-canvas token (exploration.css), so each look
+    // can tint the room. Set as scene.background rather than the clear colour: the
+    // bloom composer's render targets skip colour management on clear, which
+    // lifted a near-black clear colour to a visible grey-blue.
+    const canvas = getComputedStyle(container).getPropertyValue('--x-canvas').trim()
+    this.scene.background = new THREE.Color(canvas || '#050608')
     renderer.localClippingEnabled = true
     const rect = container.getBoundingClientRect()
     renderer.setSize(Math.max(rect.width, 1), Math.max(rect.height, 1))
