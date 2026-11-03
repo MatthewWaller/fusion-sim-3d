@@ -95,7 +95,7 @@ export default function Hud(props: HudProps) {
             <Row label="P_in" value={s.p_input.toFixed(1)} unit="MW" />
             <Row label="P_rad" value={s.p_rad.toFixed(1)} unit="MW" />
             <Row label="P_fus" value={fusion ? fusion.p_fus.toFixed(fusion.p_fus < 1 ? 3 : 1) : '—'} unit="MW" />
-            <Row label="Q" value={fusion ? formatQ(fusion.q_plasma) : '—'} />
+            <Row label="Q" value={fusion?.q_plasma != null ? formatQ(fusion.q_plasma) : '—'} />
             <Row label="β_N" value={s.beta_n.toFixed(2)} tone={s.beta_n > 3 ? 'warn' : undefined} />
             <Row label="q₉₅" value={s.q95.toFixed(2)} tone={s.q95 < 2.5 ? 'warn' : undefined} />
             <Row label="f_GW" value={s.f_greenwald.toFixed(2)} tone={s.f_greenwald >= 1 ? 'bad' : s.f_greenwald >= 0.85 ? 'warn' : undefined} />

@@ -104,6 +104,7 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     portR: 2.73, portZ: 0, portRadius: 0.42, portLength: 0.22, portPhi: 0,
     camR: 2.95, camZ: 0.04, camPhi: 0,
     lookR: 1.30, lookZ: -0.02, lookPhi: 0.26, fov: 80,
+    wide: { lookPhi: 0.32 },
     tileColor: [22, 22, 26],
     tileGridSpacing: { poloidal: 0.10, toroidal: 0.10 },
     tileGridDarken: 0.28,
@@ -166,6 +167,8 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     portR: 8.30, portZ: 0, portRadius: 0.60, portLength: 0.35, portPhi: 0,
     camR: 8.65, camZ: 0.06, camPhi: 0,
     lookR: 4.00, lookZ: -0.03, lookPhi: 0.22, fov: 80,
+    // ITER's divertor sits about 3.5 m below the port; the generic phone tilt is too shallow.
+    wide: { fov: 88, camZ: 0.35, lookZ: -1.15 },
     tileColor: [38, 36, 32],
     tileGridSpacing: { poloidal: 0.15, toroidal: 0.12 },
     tileGridDarken: 0.15,
@@ -231,6 +234,8 @@ const PORT_CONFIGS: Record<string, PortConfig> = {
     portR: 3.80, portZ: 0, portRadius: 0.50, portLength: 0.30, portPhi: 0,
     camR: 4.10, camZ: 0.06, camPhi: 0,
     lookR: 2.00, lookZ: -0.03, lookPhi: 0.25, fov: 80,
+    // JET's wall is close to the port: the generic phone tilt shows the outside of the model, so tilt less.
+    wide: { fov: 84, camZ: 0.10, lookZ: -0.14, lookPhi: 0.31 },
     tileColor: [32, 30, 28],
     tileGridSpacing: { poloidal: 0.12, toroidal: 0.10 },
     tileGridDarken: 0.15,
@@ -320,7 +325,6 @@ export const DEFAULT_POWER_SCALE = 0.5
 // ═══ Per-device glow tuning ═══
 export interface GlowTuning {
   color: { r: number; g: number; b: number }
-  jitterAmplitude: number   // R/Z position jitter (metres)
   flickerDepth: number      // 0 = uniform, 1 = full range
   pointSize: number         // sprite size in world units
 }
@@ -329,35 +333,30 @@ export const DEVICE_GLOW_TUNING: Record<string, GlowTuning> = {
   // DIII-D: barely perceptible — faintest hint of warm glow
   diiid: {
     color: { r: 1.0, g: 0.45, b: 0.15 },      // warm orange
-    jitterAmplitude: 0.001,
     flickerDepth: 0.05,
     pointSize: 0.08,
   },
   // CENTAUR: dazzling — 30 MW ICRH into compact NT plasma, intense divertor load
   centaur: {
     color: { r: 1.0, g: 0.25, b: 0.06 },       // deep reddish orange (D-T)
-    jitterAmplitude: 0.008,
     flickerDepth: 0.40,
     pointSize: 0.40,
   },
   // ITER: most dazzling — 500 MW fusion power, extreme divertor heat flux
   iter: {
     color: { r: 1.0, g: 0.18, b: 0.05 },       // deep red
-    jitterAmplitude: 0.022,
     flickerDepth: 0.55,
     pointSize: 0.75,
   },
   // SPARC: moderate
   sparc: {
     color: { r: 1.0, g: 0.35, b: 0.10 },       // reddish orange
-    jitterAmplitude: 0.006,
     flickerDepth: 0.30,
     pointSize: 0.28,
   },
   // JET: moderate — visible but less intense than ITER/CENTAUR
   jet: {
     color: { r: 1.0, g: 0.22, b: 0.06 },       // deep red
-    jitterAmplitude: 0.007,
     flickerDepth: 0.25,
     pointSize: 0.35,
   },
@@ -365,7 +364,6 @@ export const DEVICE_GLOW_TUNING: Record<string, GlowTuning> = {
 
 export const DEFAULT_GLOW_TUNING: GlowTuning = {
   color: { r: 1.0, g: 0.45, b: 0.15 },
-  jitterAmplitude: 0.006,
   flickerDepth: 0.35,
   pointSize: 0.30,
 }

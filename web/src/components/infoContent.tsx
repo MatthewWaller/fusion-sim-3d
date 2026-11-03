@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- this module exports helpers alongside its component by design */
 /**
  * Physics and engineering documentation for info popups.
  * Written at an undergraduate level with references to key review papers.
@@ -118,7 +119,7 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
     <>
       <b>Normalized beta (&beta;<sub>N</sub>)</b> &mdash; the ratio of
       plasma kinetic pressure to magnetic pressure, normalized to remove
-      trivial dependences: &beta;<sub>N</sub> = &beta;<sub>t</sub>&thinsp;aB<sub>t</sub>/I<sub>p</sub>.
+      trivial dependences: &beta;<sub>N</sub> = &beta;<sub>t</sub>[%]&thinsp;a[m]&thinsp;B<sub>t</sub>[T]/I<sub>p</sub>[MA].
       The Troyon stability limit is &beta;<sub>N</sub> &asymp; 2.8; exceeding
       it risks pressure-driven disruptions.{' '}
       <Cite doi="10.1088/0741-3335/26/1A/209">Troyon et al., PPCF 26, 209 (1984)</Cite>.
@@ -127,10 +128,10 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
   li: (
     <>
       <b>Internal inductance (l<sub>i</sub>)</b> &mdash; a dimensionless
-      measure of current-profile peakedness. l<sub>i</sub> &asymp; 1 indicates
-      a broad, stable profile. Very peaked profiles (high l<sub>i</sub>)
-      can trigger sawtooth crashes; very broad profiles may approach the
-      kink stability boundary.
+      measure of current-profile peakedness; l<sub>i</sub> &asymp; 0.7&ndash;1
+      is typical. Low l<sub>i</sub> (broad profile) lowers the no-wall
+      &beta; and kink limits; high l<sub>i</sub> (peaked profile) favors
+      sawteeth and, at fixed elongation, reduces the vertical-stability margin.
     </>
   ),
   d_alpha: (
@@ -166,7 +167,7 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
     <>
       <b>Greenwald fraction (f<sub>GW</sub>)</b> &mdash; the ratio of
       line-averaged density to the empirical density limit
-      n<sub>GW</sub> = I<sub>p</sub>/(&pi;a&sup2;). Operating above
+      n<sub>GW</sub>[10<sup>20</sup>&nbsp;m<sup>&minus;3</sup>] = I<sub>p</sub>[MA]/(&pi;a&sup2;[m&sup2;]). Operating above
       f<sub>GW</sub> &asymp; 0.85&ndash;1.0 risks a radiative collapse
       and density-limit disruption.{' '}
       <Cite doi="10.1088/0741-3335/44/8/201">Greenwald, PPCF 44, R27 (2002)</Cite>.
@@ -229,7 +230,8 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
     <>
       <b>Input power (P<sub>in</sub>)</b> &mdash; total heating power
       delivered to the plasma: P<sub>in</sub> = P<sub>OH</sub> +
-      P<sub>NBI</sub> + P<sub>ECH</sub>. The threshold for L&ndash;H
+      P<sub>NBI</sub> + P<sub>ECH</sub> + P<sub>ICH</sub> + P<sub>&alpha;</sub>
+      (P<sub>&alpha;</sub> in D-T only). The threshold for L&ndash;H
       transition scales with density and magnetic field. In the
       steady state, P<sub>in</sub> &asymp; P<sub>loss</sub> + P<sub>rad</sub>.
     </>
@@ -239,7 +241,7 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
       <b>Radiated power (P<sub>rad</sub>)</b> &mdash; power lost by
       electromagnetic radiation: bremsstrahlung, intrinsic impurity
       radiation from wall materials (carbon, tungsten), and intentional
-      impurity seeding (neon). Measured by bolometer arrays. Typical
+      impurity seeding (nitrogen, neon or argon). Measured by bolometer arrays. Typical
       H-mode radiative fractions are 15&ndash;30%.
       High P<sub>rad</sub>/P<sub>in</sub> ratios can lead to radiative
       collapse.
@@ -251,8 +253,9 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
       power from D-T (or D-D) fusion reactions. For D-T:
       P<sub>fus</sub> = 5 &times; P<sub>&alpha;</sub> since the 3.52 MeV alpha
       carries 20% of the 17.59 MeV total reaction energy. The ITER design
-      target is P<sub>fus</sub> &asymp; 500 MW at Q = 10. JET achieved a
-      record 11 MW during DTE2 (2021).
+      target is P<sub>fus</sub> &asymp; 500 MW at Q = 10. JET reached a
+      16 MW peak (DTE1, 1997) and 59 MJ over 5 s (DTE2, 2021), raised to
+      69 MJ in DTE3 (2023).
     </>
   ),
   p_loss: (
@@ -266,10 +269,37 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
   v_loop: (
     <>
       <b>Loop voltage (V<sub>loop</sub>)</b> &mdash; the toroidal
-      electric field driving the plasma current, measured by flux loops.
-      In steady-state (fully driven) plasmas, V<sub>loop</sub> &rarr; 0.
-      A spike in V<sub>loop</sub> often precedes a disruption as the
-      current channel collapses.
+      electromotive force the central solenoid applies to drive the plasma
+      current, measured by flux loops. Several volts during the current
+      ramp (L<sub>p</sub>&middot;dI<sub>p</sub>/dt), a fraction of a volt in
+      flat-top (R<sub>p</sub>&middot;I<sub>p</sub>, less the bootstrap and
+      beam-driven current the solenoid need not supply), negative in
+      ramp-down. In steady-state (fully driven) plasmas, V<sub>loop</sub>
+      &rarr; 0. During a current quench it spikes to the resistive drop
+      across the cold plasma.
+    </>
+  ),
+  psi_oh: (
+    <>
+      <b>Solenoid flux (&Psi;<sub>OH</sub>)</b> &mdash; the volt-seconds
+      the central solenoid has spent, as a fraction of its swing. Every
+      tokamak pulse is a transformer pulse: the ramp-up takes the
+      inductive flux L<sub>p</sub>I<sub>p</sub> (part of which the
+      vertical-field coils supply) plus the resistive flux of the cold
+      start-up plasma, and the flat-top burns V<sub>loop</sub> every second.
+      When the swing is gone the solenoid can push no further and the
+      current decays on its resistive time, which is what ends an
+      inductive flat-top on a real machine.
+    </>
+  ),
+  i_ni: (
+    <>
+      <b>Non-inductive current (I<sub>ni</sub>)</b> &mdash; the part of
+      I<sub>p</sub> the solenoid need not drive: bootstrap current
+      (f<sub>bs</sub> = C<sub>bs</sub>(&radic;&epsilon;&thinsp;&beta;<sub>p</sub>)<sup>1.3</sup>,
+      ITER Physics Design Guidelines) plus beam- and EC-driven current,
+      I<sub>cd</sub> &prop; T<sub>e</sub>P<sub>cd</sub>/(n&#x0304;<sub>e</sub>R<sub>0</sub>).
+      ICH heats only. The ohmic circuit drives I<sub>p</sub> &minus; I<sub>ni</sub>.
     </>
   ),
   impurity_fraction: (
@@ -277,14 +307,14 @@ export const traceDescriptions: Record<string, React.ReactNode> = {
       <b>Impurity fraction (f<sub>Imp</sub>)</b> &mdash; the fraction of
       impurity ions (carbon, tungsten, etc.) relative to the main
       fuel species. Impurities dilute the fuel and increase
-      radiative losses. Wall conditioning (boronization, glow pulse
+      radiative losses. Wall conditioning (boronization, glow-discharge
       cleaning) is used to minimize impurity influx.
     </>
   ),
   disruption_risk: (
     <>
-      <b>Disruption risk (D<sub>risk</sub>)</b> &mdash; a model estimate
-      of the probability of an imminent disruption, based on proximity
+      <b>Disruption hazard (D<sub>risk</sub>)</b>: the model's estimate
+      of the probability <em>per second</em> that a disruption begins, based on proximity
       to known operational limits: q<sub>95</sub> &lt; 2 (kink),
       &beta;<sub>N</sub> &gt; 2.8 (Troyon), f<sub>GW</sub> &gt; 1
       (Greenwald). Real-time disruption predictors are an active area
@@ -353,7 +383,7 @@ export const plasmaParamsInfo = (
     <Heading>T<sub>e0</sub> &mdash; Central Temperature</Heading>
     <p>
       The peak electron temperature (keV) at the magnetic axis.
-      Fusion reactivity peaks near 15&ndash;20 keV for D-T fuel.
+      At fixed pressure, D-T fusion power (&prop; ⟨&sigma;v⟩/T&sup2;) peaks near 13&ndash;15 keV.
       Central temperatures of 10+ keV are needed for net energy gain.
     </p>
     <Heading>n&#x0304;<sub>e</sub> &mdash; Average Density</Heading>
@@ -404,8 +434,10 @@ export const stabilityInfo = (
     </p>
     <Heading>&beta;<sub>N</sub> &mdash; Normalized Beta</Heading>
     <p>
-      The Troyon limit at &beta;<sub>N</sub> &asymp; 2.8 bounds the
-      achievable plasma pressure. Warning above 2.5, danger above 2.8.
+      The no-wall limit bounds the achievable plasma pressure. The readouts
+      take it as &beta;<sub>N</sub> = 4&thinsp;l<sub>i</sub> (2.8, the Troyon
+      value, when l<sub>i</sub> is unavailable). Warning above 0.9 of the
+      limit, danger at it.
       Advanced tokamak scenarios push toward higher &beta;<sub>N</sub>
       with active feedback stabilization.{' '}
       <Cite doi="10.1088/0741-3335/26/1A/209">Troyon et al. (1984)</Cite>.
@@ -427,16 +459,26 @@ export const stabilityInfo = (
     </p>
     <Heading>l<sub>i</sub> &mdash; Internal Inductance</Heading>
     <p>
-      Indicates current profile shape. Very low l<sub>i</sub>
-      (broad current) can approach the vertical stability boundary;
-      very high l<sub>i</sub> (peaked current) increases sawtooth
-      activity and may destabilize tearing modes.
+      Indicates current profile shape. Low l<sub>i</sub> (broad current)
+      lowers the no-wall &beta; and kink limits; high l<sub>i</sub> (peaked
+      current) increases sawtooth activity, may destabilize tearing modes
+      and, at fixed elongation, reduces the vertical-stability margin.
     </p>
     <Heading>V<sub>loop</sub> &mdash; Loop Voltage</Heading>
     <p>
-      The inductive drive. A sudden rise in V<sub>loop</sub> is a
+      The inductive drive, from the plasma circuit equation
+      L<sub>p</sub>dI<sub>p</sub>/dt + R<sub>p</sub>(I<sub>p</sub> &minus; I<sub>ni</sub>)
+      = V<sub>loop</sub>. A sudden rise in V<sub>loop</sub> is a
       precursor to current quench and disruption. In steady-state
       scenarios with full non-inductive current drive, V<sub>loop</sub> &rarr; 0.
+    </p>
+    <Heading>&Psi;<sub>OH</sub> &mdash; Solenoid Flux</Heading>
+    <p>
+      The fraction of the central solenoid's volt-second swing already
+      spent. Past 100 % the solenoid holds its flux and the current decays
+      on the resistive time: the pulse must end or be sustained
+      non-inductively. ITER's solenoid carries 277 V&middot;s; DIII-D's
+      Ohmic coil about 7.5 V&middot;s.
     </p>
     <Ref>
       Freidberg, <i>Ideal MHD</i>, Cambridge Univ. Press (2014) &mdash; stability theory.
@@ -464,28 +506,48 @@ export const divertorInfo = (
       &lambda;<sub>q</sub> is set by cross-field transport and follows the{' '}
       <Cite doi="10.1088/0029-5515/53/9/093031">Eich scaling</Cite>:
       &lambda;<sub>q</sub> &prop; B<sub>pol</sub><sup>&minus;0.9</sup>,
-      giving widths of only 1&ndash;5 mm on large tokamaks. The resulting
-      heat flux can reach 10&ndash;20 MW/m&sup2; &mdash; comparable to the
-      surface of the Sun.
+      giving widths of only 1&ndash;5 mm on large tokamaks. Unmitigated,
+      the target heat flux can reach 10&ndash;20 MW/m&sup2;; actively cooled
+      tungsten tolerates about 10 MW/m&sup2; in steady state, and designs
+      target 5&ndash;10 MW/m&sup2;.
     </p>
 
     <Heading>Detachment</Heading>
     <p>
-      At high density (high f<sub>GW</sub>), the divertor plasma radiates
-      most of the incoming power before it reaches the target plates. This
-      is called <b>detachment</b> and is essential for ITER and reactor
-      operation. The detachment fraction f<sub>det</sub> indicates how
-      much power is radiated away before reaching the plates. Impurity
-      seeding (N<sub>2</sub>, Ne, Ar) is used to promote detachment.
+      When the divertor plasma radiates most of the incoming power before it
+      reaches the target plates, the plasma <b>detaches</b>: the target
+      cools, the heat flux collapses, and the radiating zone lifts off the
+      plate and moves up the divertor leg toward the X-point. This is
+      essential for ITER and reactor operation.{' '}
+      <Cite doi="10.1088/1361-6587/aa5e6e">Goldston, Reinke and Schwartz</Cite>{' '}
+      find that the impurity fraction needed to detach scales as
+      P<sub>sep</sub> / [B<sub>p</sub>(1+&kappa;&sup2;)<sup>3/2</sup>(n<sub>sep</sub>/n<sub>GW</sub>)&sup2;],
+      with no size dependence: harder with power, easier with plasma current,
+      shaping and density. The model uses that form, calibrated on their
+      ASDEX Upgrade case, with the fuel and wall impurities counted as an
+      equivalent 0.7% nitrogen and the seeded species added to it in
+      nitrogen-equivalent units. Unseeded,
+      a DIII-D-size divertor is half detached at f<sub>GW</sub> = 0.7, and
+      the large machines are no longer detached for free at high density.
+      Three seeding species are available, by machine: nitrogen radiates
+      in the divertor, neon in the divertor and edge, argon into the mantle
+      and core. Their core radiation, Z<sub>eff</sub> and fuel dilution follow
+      ADAS cooling curves; what they radiate in the divertor is what this model
+      represents. The port view tints the radiating front by the visible lines
+      of what is radiating: nitrogen green-teal, neon orange-red, argon
+      blue-violet. Over-seed and the core radiation climbs toward collapse. The divertor row reports Attached / Partial /
+      Detached at f<sub>det</sub> = 0.3 and 0.6.
     </p>
 
     <Heading>Surface Temperature</Heading>
     <p>
       The divertor tile surface temperature is determined by the heat flux,
-      the tile armor thickness, thermal conductivity, and the coolant
-      temperature. For tungsten monoblock designs (ITER, JET-ILW), the
-      coolant is pressurized water at ~150&deg;C. For carbon-wall machines
-      (DIII-D), water cooling at near-ambient temperature is used.
+      the tile armor thickness, thermal conductivity, and the cooling.
+      ITER&rsquo;s tungsten monoblocks are actively cooled by pressurized
+      water (~100&deg;C inlet) and settle at a steady temperature. The
+      JET-ILW divertor (bulk-W lamellae and W-coated CFC) and DIII-D&rsquo;s
+      graphite tiles are inertially cooled: the surface heats through the
+      pulse and the heat is removed between pulses.
     </p>
 
     <Heading>Tungsten Recrystallization</Heading>
@@ -505,6 +567,10 @@ export const divertorInfo = (
     <Ref>
       <Cite doi="10.1016/j.nme.2014.12.007">R. A. Pitts et al., Nucl. Mater. Energy (2015)</Cite>{' '}
       &mdash; ITER divertor design and power handling.
+    </Ref>
+    <Ref>
+      <Cite doi="10.1088/1361-6587/aa5e6e">R. J. Goldston, M. L. Reinke and J. A. Schwartz, Plasma Phys. Control. Fusion 59, 055015 (2017)</Cite>{' '}
+      &mdash; scaling of the impurity fraction needed for divertor detachment (eq. 9; ASDEX Upgrade calibration in Table 2).
     </Ref>
     <Ref>
       Wesson, <i>Tokamaks</i>, 4th ed., Oxford Univ. Press (2011) &mdash; Ch. 9 (Scrape-off layer and divertor).
@@ -619,9 +685,10 @@ export const powerBalanceInfo = (
       Self-heating from 3.52 MeV alpha particles produced by D-T fusion
       reactions. The alphas are confined by the magnetic field and
       thermalize in the plasma, transferring their energy to the bulk
-      ions and electrons. This is the key term that enables Q &gt; 1:
-      when P<sub>&alpha;</sub> exceeds the external heating, the plasma
-      approaches ignition. Shown only for D-T fuel.
+      ions and electrons. P<sub>&alpha;</sub> = P<sub>ext</sub> at Q = 5,
+      the burning-plasma threshold; ignition is P<sub>&alpha;</sub> alone
+      balancing the losses (P<sub>ext</sub> = 0, Q &rarr; &infin;). Shown
+      only for D-T fuel.
     </p>
     <Heading>P<sub>rad</sub> &mdash; Radiated Power</Heading>
     <p>
@@ -642,7 +709,7 @@ export const powerBalanceInfo = (
       neutrons escape to blanket modules.
     </p>
     <p className="font-mono text-gray-200 text-center my-1">
-      Q = P<sub>fus</sub> / P<sub>heat</sub>
+      Q = P<sub>fus</sub> / P<sub>ext</sub>, P<sub>ext</sub> = P<sub>NBI</sub> + P<sub>ECH</sub> + P<sub>ICH</sub> + P<sub>OH</sub>
     </p>
     <p>
       Q &gt; 1 means more fusion power out than heating power in. The ITER
@@ -670,5 +737,46 @@ export const powerBalanceInfo = (
     <Ref>
       Wesson, <i>Tokamaks</i>, 4th ed., Oxford Univ. Press (2011) &mdash; Ch. 3 (Power balance), Ch. 14 (Fusion products).
     </Ref>
+  </>
+)
+
+export const eventLogInfo = (
+  <>
+    <p>
+      An append-only record of the pulse in simulation time, in the style of
+      a control-room sequence log. Every line is an edge: a programmed step
+      (heating on, flat-top, ramp-down), a regime change (L-H transition,
+      first ELM), a limit crossing, or a stage of a disruption.
+    </p>
+    <Heading>Severities</Heading>
+    <p>
+      Nominal sequence events are uncolored. A green dot marks a favorable
+      transition. <b>MINOR</b> (amber) means a limit is being approached
+      (f<sub>GW</sub> &gt; 0.8, β<sub>N</sub> &gt; 0.9 of the no-wall limit
+      4&thinsp;l<sub>i</sub>, q<sub>95</sub> &lt; 2.5, hazard &ge; 1 %/s);
+      <b>MAJOR</b> (red) means it has been reached (hazard &ge; 10 %/s).
+      <b>INVALID</b> (magenta) marks readouts that no longer mean anything,
+      as when the plasma is gone. Alarms use hysteresis, so a noisy signal
+      does not chatter.
+    </p>
+    <Heading>Why did it disrupt</Heading>
+    <p>
+      When a disruption starts, the engine records which hazard term was
+      dominant at the trigger: density limit, β limit, kink limit, radiative
+      collapse, locked mode, or wall contact. The log names it only when that
+      term carried more than half of the hazard and the hazard exceeded
+      5 %/s; otherwise the line reads &ldquo;cause not resolved&rdquo;.
+      Hovering a line shows the numbers at the trigger.
+    </p>
+    <Heading>Pulse number and report</Heading>
+    <p>
+      Starting a new pulse issues the next pulse number, kept in this
+      browser (resuming from Pause keeps the number). When the
+      pulse ends, the Report view shows achieved against programmed: pulse
+      length, I<sub>p</sub> flat-top, peak W<sub>th</sub> and β<sub>N</sub>,
+      max f<sub>GW</sub>, min q<sub>95</sub>, H<sub>98</sub>, time in H-mode,
+      ELM count, peak fusion power and Q, and whether it disrupted. The
+      previous pulse's traces stay on the trace panel as a gray reference.
+    </p>
   </>
 )

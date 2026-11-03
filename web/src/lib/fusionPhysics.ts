@@ -125,11 +125,32 @@ export interface FusionState {
   p_alpha: number        // Alpha heating power (MW) — DT: P_fus/5; DD: charged products
   neutron_rate: number   // Neutrons per second
   neutron_power: number  // Power carried by neutrons (MW)
-  q_plasma: number       // P_fus / P_input
+  q_plasma: number | null // Q = P_fus / P_ext; null when P_ext < P_EXT_MIN
   fuel_type: 'DD' | 'DT'
 }
 
 // ── Main computation ────────────────────────────────────────────────
+
+/** Below this external heating (MW) Q is not defined and is shown as a dash. */
+export const P_EXT_MIN = 0.5
+
+/**
+ * External heating P_ext (MW): NBI + ECH + ICH + Ohmic. The engine's p_input
+ * includes the alpha self-heating, so it is subtracted here.
+ */
+export function externalHeating(pInput: number, pAlpha: number | undefined): number {
+  return pInput - (pAlpha ?? 0)
+}
+
+/**
+ * Fusion gain Q = P_fus / P_ext, the one definition every readout and the
+ * end-of-pulse report use. No cap and no current fade: null (shown as "—")
+ * when P_ext < 0.5 MW, where the ratio means nothing.
+ */
+export function fusionGain(pFus: number, pInput: number, pAlpha: number | undefined): number | null {
+  const pExt = externalHeating(pInput, pAlpha)
+  return pExt >= P_EXT_MIN ? pFus / pExt : null
+}
 
 /**
  * Compute fusion power, neutron rate, and Q from current plasma state.
@@ -146,7 +167,9 @@ export function computeFusion(snapshot: Snapshot, device: Device): FusionState {
   const N = ne_prof.length             // 51
   const drho = 1.0 / (N - 1)          // 0.02
 
-  const f_fuel = Math.max(1.0 - snapshot.impurity_fraction, 0.5)
+  // Fuel dilution by the seeded species, from the engine (1 − Σ c_z <Z>);
+  // older snapshots carry only the total fraction.
+  const f_fuel = Math.max(snapshot.fuel_fraction ?? (1.0 - snapshot.impurity_fraction), 0.5)
   const V_total = device.volume        // m³
 
   // Build volume weights: dV_i ∝ ρ_i · dρ (cylindrical-like shells)
@@ -218,36 +241,7 @@ export function computeFusion(snapshot: Snapshot, device: Device): FusionState {
     p_alpha_MW = p_fus_MW - neutron_power_MW  // rest is charged products
   }
 
-  // Q = P_fus / P_external (external heating only, excludes alpha self-heating).
-  // snapshot.p_input now includes p_alpha from the Rust transport model,
-  // so subtract it for the standard physics Q definition.
-  //
-  // During ramp-down, P_external drops faster than the thermal energy decays,
-  // causing a nonphysical spike in Q = P_fus / P_ext.  Suppress this by
-  // requiring P_external to be at least 20% of P_input (i.e. alpha power
-  // isn't dominating the denominator) and smoothly ramping Q to zero when
-  // Ip is below 50% of nominal (plasma is no longer in a meaningful state).
-  // Q = P_fusion / P_external, with protections against rampdown spikes.
-  // During rampdown, external heating drops before fusion power decays
-  // (thermal inertia), causing Q = P_fus/P_ext to spike. Solution:
-  // 1. Floor the denominator at the total external heating (not alpha)
-  // 2. Fade Q smoothly as Ip drops below flat-top
-  // 3. Cap at 15 to prevent display artifacts
-  const p_alpha = snapshot.p_alpha ?? 0
-  const p_external = snapshot.p_input - p_alpha
-  const p_aux = snapshot.p_input - p_alpha - (snapshot.p_ohmic ?? 0)
-  const ip_frac = device.ip_max > 0 ? snapshot.ip / device.ip_max : 0
-  const prog_ip_frac = device.ip_max > 0 ? (snapshot.prog_ip ?? snapshot.ip) / device.ip_max : 0
-  // Fade starts early (98% Ip) and reaches zero at 30%
-  const ip_fade = Math.min(Math.max((prog_ip_frac - 0.30) / 0.68, 0), 1.0)
-    * Math.min(Math.max((ip_frac - 0.20) / 0.60, 0), 1.0)
-  // Denominator: use the larger of actual p_external or the auxiliary
-  // heating power. This prevents the denom from collapsing when heating
-  // is cut before stored energy decays.
-  const denom = Math.max(p_external, p_aux, 1.0)
-  const q_plasma = denom > 1.0
-    ? Math.min(p_fus_MW / denom, 15) * ip_fade
-    : 0
+  const q_plasma = fusionGain(p_fus_MW, snapshot.p_input, snapshot.p_alpha)
 
   return {
     p_fus: p_fus_MW,
@@ -410,6 +404,130 @@ export class DivertorThermalModel {
   }
 }
 
+// ── Detachment ─────────────────────────────────────────────────────
+// Goldston, Reinke and Schwartz (PPCF 59, 2017, 055015) argue that the
+// impurity cooling that detaches a divertor is set by the upstream density,
+// which is itself tied to the Greenwald limit, and find that the impurity
+// fraction required for detachment scales as
+//
+//     c_z,det ∝ P_sep / [ ⟨B_p⟩ (1 + κ²)^{3/2} (n_sep / n_GW)² ],
+//     ⟨B_p⟩ = μ0 I_p / [ 2π a √((1 + κ²)/2) ]
+//
+// with no explicit dependence on machine size (their eq. 9 and §4). The
+// constant is fixed by their comparison case, the ASDEX Upgrade model case
+// of Kallenbach et al. (PPCF 58, 2016, 045013), calibrated against AUG
+// data and partially detached: P_sep = 10.7 MW, ⟨B_p⟩ = 0.34 T, κ95 = 1.63,
+// n_sep/n_GW = 7e19/1.44e20 = 0.486, c_N = 4 % in the divertor (their
+// Table 2). κ throughout is κ95, as in that table.
+const GRS_AUG_P_SEP = 10.7       // MW
+const GRS_AUG_BP = 0.34          // T
+const GRS_AUG_KAPPA95 = 1.63
+const GRS_AUG_F_SEP = 7e19 / 1.44e20
+const GRS_AUG_C_N_DIV = 0.04
+/** c_N,det,div = K_GRS × P_sep / [⟨B_p⟩ (1+κ95²)^1.5 f_sep²]  (P in MW, B in T) */
+const K_GRS = GRS_AUG_C_N_DIV
+  / (GRS_AUG_P_SEP / (GRS_AUG_BP * Math.pow(1 + GRS_AUG_KAPPA95 ** 2, 1.5) * GRS_AUG_F_SEP ** 2))
+// The transport model carries the line-averaged Greenwald fraction; the
+// separatrix density is lower. Taken as n_sep = 0.6 n̄ (AUG and JET H-mode
+// pedestals put n_sep at 0.4–0.7 n̄; GRS note good H-mode needs n_sep < n̄/2).
+const N_SEP_OVER_NBAR = 0.6
+// The calibration is divertor nitrogen; the engine's seeded impurities are
+// core fractions of nitrogen, neon and argon. Two conversions, both stated
+// as assumptions:
+//  - the species differ in how much parallel heat flux a given fraction can
+//    dissipate: at the calibration case's impurity lifetime (nτ = 5e16 s/m³)
+//    GRS fig. 1d puts neon about 1.9× and argon about 2.4× above nitrogen
+//    in q_det/(n √F_z), that is about 3.6× and 6× in F_z. Each species is
+//    therefore counted in nitrogen-equivalent units with these weights;
+//  - the divertor is enriched in seeded impurities relative to the core by
+//    a factor of about 3 (assumption, taken the same for every species).
+export const SEED_EFFICIENCY = { n: 1.0, ne: 3.5, ar: 6.0 } as const
+const DIVERTOR_ENRICHMENT = 3.0
+
+/** Seeded impurity content in nitrogen-equivalent core fraction. Older
+ *  snapshots carry only the total `impurity_fraction`, which was neon. */
+export function seededNitrogenEquivalent(snapshot: Snapshot): number {
+  if (snapshot.imp_n !== undefined || snapshot.imp_ne !== undefined || snapshot.imp_ar !== undefined) {
+    return (snapshot.imp_n ?? 0) * SEED_EFFICIENCY.n
+      + (snapshot.imp_ne ?? 0) * SEED_EFFICIENCY.ne
+      + (snapshot.imp_ar ?? 0) * SEED_EFFICIENCY.ar
+  }
+  return Math.max(snapshot.impurity_fraction ?? 0, 0) * SEED_EFFICIENCY.ne
+}
+const DETACH_CAP = 0.97
+// The devices carry the separatrix elongation; the 95 % surface is rounder.
+// κ95 ≈ 1 + 0.75 (κ_sep − 1) reproduces ITER (2.1 → 1.83 against 1.8 in
+// the paper's table) and DIII-D (1.7 → 1.53).
+const kappa95 = (kappaSep: number) => 1 + 0.75 * (kappaSep - 1)
+
+/** Core seeded fraction, in nitrogen-equivalent units, needed to detach,
+ *  from the calibrated GRS scaling, for a current (MA), minor radius (m),
+ *  separatrix elongation, separatrix power (MW) and line-averaged Greenwald
+ *  fraction. */
+function thresholdCore(ip_MA: number, a: number, kappaSep: number, p_sep: number, f_gw: number): number {
+  const MU0 = 4 * Math.PI * 1e-7
+  const kappa = kappa95(kappaSep)
+  const bp = MU0 * ip_MA * 1e6 / (2 * Math.PI * a * Math.sqrt((1 + kappa * kappa) / 2))
+  const f_sep = f_gw * N_SEP_OVER_NBAR
+  const c_n_div = K_GRS * p_sep / (bp * Math.pow(1 + kappa * kappa, 1.5) * f_sep * f_sep)
+  return c_n_div / DIVERTOR_ENRICHMENT
+}
+
+// Intrinsic radiators (fuel Balmer/Lyman light, wall impurities) expressed
+// as an equivalent core fraction in nitrogen units: the threshold of an
+// unseeded DIII-D-like H-mode (1.5 MA, a 0.56 m, κ_sep 1.7, P_sep 4.4 MW)
+// at f_GW = 0.7, so that pulse is half detached there, which is where the
+// earlier density-only sigmoid put it. About 0.7 % nitrogen-equivalent.
+export const INTRINSIC_C_Z_EQUIV = thresholdCore(1.5, 0.56, 1.7, 4.4, 0.7)
+
+/**
+ * Core seeded fraction (nitrogen-equivalent) at which the divertor
+ * detaches, from the Goldston–Reinke–Schwartz scaling calibrated as above.
+ * Returns Infinity when there is no current (nothing to detach).
+ */
+export function detachmentThreshold(snapshot: Snapshot, device: Device): number {
+  if (!(snapshot.ip > 0)) return Infinity
+  // Power crossing the separatrix: transport losses less core radiation.
+  // The scaling was derived for H-mode-relevant SOL widths and heat fluxes,
+  // and its threshold fraction vanishes as P_sep → 0, which would call a
+  // cold ohmic ramp-up fully detached. P_sep is therefore floored at the
+  // engine's own H-L back-transition power, 0.8 P_LH (the device-adjusted
+  // Martin threshold the transport model uses): in H-mode the scaling is
+  // applied as published, and the floor only regularizes L-mode and ohmic
+  // phases. Where it is active the density dependence is weaker than f_GW²
+  // because P_LH itself rises with density. The floor applies only where
+  // H-mode is accessible at all (P_LH within the heating power): CENTAUR's
+  // negative-triangularity edge carries a threshold factor of 3 precisely
+  // so that it never is, and its L-mode-like edge takes the scaling as is.
+  const p_lh = snapshot.p_lh ?? 0
+  const p_floor = p_lh > 0 && p_lh <= Math.max(snapshot.p_input, 0) ? 0.8 * p_lh : 0
+  const p_sep = Math.max(snapshot.p_loss - snapshot.p_rad, p_floor, 0.05)
+  const f_gw = Math.max(snapshot.f_greenwald, 0)
+  if (f_gw <= 0) return Infinity
+  return thresholdCore(snapshot.ip, device.a, device.kappa, p_sep, f_gw)
+}
+
+/**
+ * Divertor detachment fraction, 0 (attached) to 0.97 (fully detached).
+ *
+ * The intrinsic radiators plus the seeded fractions (nitrogen-equivalent)
+ * are compared with the fraction the GRS scaling says is needed,
+ * D = (c_int + c_z) / c_det,
+ * and mapped through a sigmoid, f_detach = 1 − 1/(1 + D³). Because c_det
+ * falls as f_GW², the density dependence at fixed power is the same
+ * (f_GW/f_0)^6 shape as the earlier density-only model; what is new is
+ * that detachment gets harder with separatrix power and easier with
+ * poloidal field and shaping, as the scaling says, and that seeding can
+ * bring it on at any density.
+ */
+export function detachmentFraction(snapshot: Snapshot, device: Device): number {
+  const c_det = detachmentThreshold(snapshot, device)
+  if (!Number.isFinite(c_det)) return 0
+  const c_z = seededNitrogenEquivalent(snapshot)
+  const qualifier = (INTRINSIC_C_Z_EQUIV + c_z) / c_det
+  return Math.min(1 - 1 / (1 + Math.pow(qualifier, 3)), DETACH_CAP)
+}
+
 /**
  * Estimate divertor peak heat flux using Eich scaling for the SOL
  * power width and a simple detachment model based on Greenwald fraction.
@@ -477,9 +595,8 @@ export function computeDivertorHeatFlux(snapshot: Snapshot, device: Device): Div
   // Inter-ELM attached heat flux (2/3 inner/outer sharing)
   const q_attached = A_wet > 0 ? 0.67 * p_sol_per_div_W / A_wet : 0  // W/m²
 
-  // Detachment correction
-  const f_GW = snapshot.f_greenwald
-  const f_detach = Math.min(1 - 1 / (1 + Math.pow(f_GW / 0.7, 6)), 0.97)
+  // Detachment correction (density and seeded impurities, see detachmentFraction)
+  const f_detach = detachmentFraction(snapshot, device)
 
   // Inter-ELM baseline heat flux
   const q_interELM = q_attached * (1 - f_detach) / 1e6  // MW/m²

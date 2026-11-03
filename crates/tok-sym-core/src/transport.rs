@@ -73,7 +73,29 @@ pub struct TransportModel {
     pub elm_next_period: f64,
     /// Impurity fraction (relative to electron density) — currently neon,
     /// generic to support future species (argon, krypton, nitrogen).
+    /// Total seeded impurity fraction n_z/n_e (sum over species); the ELM
+    /// regime gates and the collapse threshold read this.
     pub impurity_fraction: f64,
+    /// Core fractions per seeded species
+    pub imp_n: f64,
+    pub imp_ne: f64,
+    pub imp_ar: f64,
+    /// Effective charge including the seeded species (device intrinsic + seeded)
+    pub z_eff: f64,
+    /// Fuel ion fraction n_fuel/n_e after dilution by the seeded species
+    pub fuel_fraction: f64,
+    /// One-turn resistance (Ω) and non-inductive current (MA) supplied by
+    /// the Ohmic drive circuit for this step, so the Ohmic heating is the
+    /// same R_p·I_p·(I_p − I_ni) the loop voltage was computed from. None
+    /// falls back to the model's own volume-averaged Spitzer estimate.
+    #[serde(skip)]
+    ohmic_drive: Option<(f64, f64)>,
+    /// Programmed current (MA) when the circuit drives the actual one: the
+    /// ramp-down heuristics below (confinement fade, β_N cap) are about the
+    /// programmed termination, not about a current that sags because the
+    /// solenoid ran out of flux or a quench is under way.
+    #[serde(skip)]
+    ip_programmed: Option<f64>,
 }
 
 impl Default for TransportModel {
@@ -109,6 +131,13 @@ impl Default for TransportModel {
             elm_rng_state: 54321,
             elm_next_period: 0.0,
             impurity_fraction: 0.0,
+            imp_n: 0.0,
+            imp_ne: 0.0,
+            imp_ar: 0.0,
+            z_eff: 1.5,
+            fuel_fraction: 1.0,
+            ohmic_drive: None,
+            ip_programmed: None,
         }
     }
 }
@@ -136,9 +165,21 @@ pub struct ProgramValues {
     pub d2_puff: f64,
     /// Neon impurity seeding rate (10²⁰ particles/s)
     pub neon_puff: f64,
+    /// Nitrogen seeding rate (10²⁰ atoms/s)
+    pub n2_puff: f64,
+    /// Argon seeding rate (10²⁰ atoms/s)
+    pub argon_puff: f64,
 }
 
 impl TransportModel {
+    /// Hand the Ohmic circuit's resistance (Ω) and non-inductive current
+    /// (MA) to the next step's power balance, and the programmed current
+    /// (MA) its ramp-down heuristics should read.
+    pub fn set_ohmic_drive(&mut self, r_plasma: f64, i_ni: f64, ip_programmed: f64) {
+        self.ohmic_drive = Some((r_plasma, i_ni));
+        self.ip_programmed = Some(ip_programmed);
+    }
+
     /// Simple xorshift RNG returning a value in [0, 1).
     fn next_rng(&mut self) -> f64 {
         let mut x = self.elm_rng_state;
@@ -159,7 +200,7 @@ impl TransportModel {
     /// * `device` - the tokamak device
     /// * `prog` - programmed waveform values at current time
     /// * `z_eff` - effective charge
-    pub fn step(&mut self, dt: f64, device: &Device, prog: &ProgramValues, z_eff: f64) {
+    pub fn step(&mut self, dt: f64, device: &Device, prog: &ProgramValues, z_eff_intrinsic: f64) {
         let ip = prog.ip;
         let bt = prog.bt;
 
@@ -180,12 +221,24 @@ impl TransportModel {
             self.p_ohmic = 0.0;
             self.p_rad = 0.0;
             self.in_hmode = false;
+            self.imp_n = 0.0;
+            self.imp_ne = 0.0;
+            self.imp_ar = 0.0;
+            self.impurity_fraction = 0.0;
+            self.z_eff = z_eff_intrinsic;
+            self.fuel_fraction = 1.0;
             return;
         }
 
         let r0 = device.r0;
         let a = device.a;
+        // Programmed (separatrix) elongation — the plasma *shape*.
         let kappa = prog.kappa;
+        // Areal elongation κ_a = S/(πa²), which is what IPB98(y,2), the Uckan
+        // q* formula and the poloidal cross-section area are defined against.
+        // The programmed value ramps 1.0 → κ_sep, so the device ratio is
+        // applied to preserve that ramp (see Device::areal_ratio).
+        let kappa_a = kappa * device.areal_ratio();
         let volume = device.volume;
         let surface = device.surface_area;
 
@@ -201,16 +254,48 @@ impl TransportModel {
         // Central density peaking factor ~1.3
         self.ne0 = self.ne_bar * 1.3;
 
-        // ── Impurity fraction evolution ──
-        // Impurity (currently neon) accumulates from seeding, decays via particle transport
+        // ── Seeded impurity fractions ──
+        // Each species accumulates from its puff (10²⁰ atoms/s, 30 % reaching
+        // the core per unit n_e V) and decays with a 0.5 s confinement time.
         let tau_impurity = 0.5; // impurity confinement time (s)
-        let impurity_source = if self.ne_bar > 0.05 {
-            prog.neon_puff * 0.3 / (self.ne_bar * volume).max(0.01)
-        } else {
-            0.0
-        };
-        self.impurity_fraction += (impurity_source - self.impurity_fraction / tau_impurity) * dt;
-        self.impurity_fraction = self.impurity_fraction.clamp(0.0, 0.1); // max 10% impurity fraction
+        let source = |puff: f64| if self.ne_bar > 0.05 { puff * 0.3 / (self.ne_bar * volume).max(0.01) } else { 0.0 };
+        for (frac, puff) in [
+            (&mut self.imp_n, prog.n2_puff),
+            (&mut self.imp_ne, prog.neon_puff),
+            (&mut self.imp_ar, prog.argon_puff),
+        ] {
+            *frac += (source(puff) - *frac / tau_impurity) * dt;
+            *frac = frac.clamp(0.0, 0.1); // max 10 % per species
+        }
+        self.impurity_fraction = self.imp_n + self.imp_ne + self.imp_ar;
+
+        // Charge states averaged over the temperature profile set the
+        // effective charge and the fuel dilution:
+        // Z_eff = Z_eff,intrinsic + Σ c_z (<Z²> − <Z>), n_fuel/n_e = 1 − Σ c_z <Z>.
+        // The same pass gives each species' profile-averaged cooling rate
+        // for the radiation below.
+        let mut dz_eff = 0.0;
+        let mut dilution = 0.0;
+        let mut lz_avg = [0.0; 3];
+        for (i, (frac, sp)) in [
+            (self.imp_n, crate::cooling::Species::Nitrogen),
+            (self.imp_ne, crate::cooling::Species::Neon),
+            (self.imp_ar, crate::cooling::Species::Argon),
+        ].into_iter().enumerate() {
+            let (lz, zbar, z2bar) = crate::cooling::profile_average(sp, self.te0);
+            lz_avg[i] = lz;
+            dz_eff += frac * (z2bar - zbar);
+            dilution += frac * zbar;
+        }
+        self.z_eff = z_eff_intrinsic + dz_eff;
+        let z_eff = self.z_eff;
+        self.fuel_fraction = (1.0 - dilution).max(0.5);
+        let f_fuel_seeded = self.fuel_fraction;
+        // The ELM-regime gates (QCE, type II, type I degradation) were
+        // calibrated on neon; other species enter them in neon-equivalent
+        // units with the same weights the detachment model uses (N 1,
+        // Ne 3.5, Ar 6 relative to nitrogen).
+        let imp_gate = self.imp_ne + self.imp_n / 3.5 + self.imp_ar * (6.0 / 3.5);
 
         // ── q95 ──
         // Cylindrical safety factor with elongation + triangularity correction.
@@ -219,7 +304,7 @@ impl TransportModel {
         // get unrealistically low q95 values.
         let delta = prog.delta;
         let shape_factor =
-            (1.0 + kappa * kappa * (1.0 + 2.0 * delta * delta - 1.2 * delta.powi(3))) / 2.0;
+            (1.0 + kappa_a * kappa_a * (1.0 + 2.0 * delta * delta - 1.2 * delta.powi(3))) / 2.0;
         self.q95 = 5.0 * a * a * bt * shape_factor / (r0 * ip);
         self.q95 = self.q95.max(1.0);
 
@@ -235,10 +320,19 @@ impl TransportModel {
         let te_avg = (self.te0 * 0.5).max(0.05); // rough volume average
         let eta = 2.8e-8 * z_eff / te_avg.powf(1.5); // Ω·m (approximate)
         let loop_length = 2.0 * std::f64::consts::PI * r0;
-        let cross_section = std::f64::consts::PI * a * a * kappa;
+        // Poloidal cross-section area S = π a² κ_a — this is the *definition*
+        // of the areal elongation, so κ_a is the correct factor here.
+        let cross_section = std::f64::consts::PI * a * a * kappa_a;
         let resistance = eta * loop_length / cross_section; // Ω
-        self.p_ohmic = resistance * (ip * 1e6).powi(2) * 1e-6; // MW
-        self.p_ohmic = self.p_ohmic.min(5.0); // Cap for numerical stability
+        self.p_ohmic = match self.ohmic_drive {
+            // P_OH = ∫η j·(j − j_ni) dV ≈ R_p I_p (I_p − I_ni): the driven
+            // part of the current dissipates, the non-inductive part does not.
+            // Bounded at 50 MW: the resistance is floored at a 100 eV channel,
+            // which at full current on a large machine would otherwise put
+            // hundreds of megawatts into a thermal-quench step.
+            Some((r_p, i_ni)) => (r_p * ip * (ip - i_ni).max(0.0) * 1e6).min(50.0), // MW
+            None => (resistance * (ip * 1e6).powi(2) * 1e-6).min(5.0), // cap for numerical stability
+        };
 
         // ── Alpha self-heating (0D estimate for burning plasma feedback) ──
         // Gamow-peak DT reactivity parameterization (valid 2–100 keV):
@@ -249,7 +343,7 @@ impl TransportModel {
         self.p_alpha = if is_dt && self.te0 > 1.0 {
             let ti_eff = self.te0 * 0.70; // effective volume-averaged Ti ≈ 0.70 × Te0
             let ne_vol_m3 = self.ne_bar * 0.85 * 1e20; // volume-averaged ne (m⁻³)
-            let f_fuel = (1.0 - self.impurity_fraction).max(0.5);
+            let f_fuel = f_fuel_seeded;
             let n_d = ne_vol_m3 * f_fuel / 2.0; // 50-50 D-T mix
             let n_t = n_d;
 
@@ -288,7 +382,9 @@ impl TransportModel {
         // Use volume-averaged density (ne_vol = 0.85 * ne_bar) since bremsstrahlung
         // is a volume integral, not a line integral.
         let ne_m3 = self.ne_bar * 0.85 * 1e20; // volume-averaged ne in m⁻³
-        let p_brem = 5.35e-37 * ne_m3 * ne_m3 * z_eff * te_avg.sqrt() * volume * 1e-6; // MW
+        // Intrinsic Z_eff only: the seeded species' bremsstrahlung is inside
+        // their ADAS cooling rates below (prb includes it).
+        let p_brem = 5.35e-37 * ne_m3 * ne_m3 * z_eff_intrinsic * te_avg.sqrt() * volume * 1e-6; // MW
         // Intrinsic impurity radiation from wall material (carbon, tungsten).
         // In real tokamaks, edge/SOL impurities produce significant line
         // radiation even without intentional seeding, typically 15-30% of
@@ -300,18 +396,25 @@ impl TransportModel {
         // since wall impurity sources depend on plasma-wall interaction, not
         // fusion power. Gives ~10-20% of P_external as intrinsic radiation.
         let p_external = self.p_ohmic + prog.p_nbi + prog.p_ech + prog.p_ich;
-        let rad_fraction_intrinsic = 0.10 * (z_eff - 1.0).max(0.2) + 0.05;
+        let rad_fraction_intrinsic = 0.10 * (z_eff_intrinsic - 1.0).max(0.2) + 0.05;
         let p_intrinsic = rad_fraction_intrinsic * p_external.max(0.01);
         // Line radiation (residual, on top of intrinsic)
-        let p_line = p_brem * 0.15 * (z_eff - 1.0).max(0.0);
-        // Impurity radiation — effective 0D Lz coefficient.
-        // Physical Lz(Ne) peaks at ~5e-31 W·m³ near 0.5 keV, but in real tokamaks
-        // neon concentrates in the edge/SOL, not the core volume. For our volume-
-        // averaged model, we use ~50x lower effective Lz so that realistic seeding
-        // rates (0.3–0.7 × 10²⁰/s) produce a few MW of radiation, not hundreds.
-        // (Future: Lz becomes species-dependent for argon, krypton, nitrogen, etc.)
-        let lz_impurity = 1.0e-32 * (1.0 + 0.5 * (te_avg - 1.0).abs()).max(0.5);
-        // Radiative collapse: radiation mantle moves inward at high impurity fraction
+        let p_line = p_brem * 0.15 * (z_eff_intrinsic - 1.0).max(0.0);
+        // Seeded-impurity radiation inside the separatrix, species by species,
+        // from the coronal ADAS cooling curves averaged over the temperature
+        // profile (cooling.rs; the rates include line, recombination and the
+        // impurities' own bremsstrahlung). Nitrogen and neon radiate little
+        // at keV temperatures and are divertor radiators; argon keeps a few
+        // 10^-33 W m³ into the keV range and is a mantle radiator. What the
+        // seeded species radiate in the divertor and scrape-off layer is not
+        // part of the core power balance: it is the dissipation the divertor
+        // detachment model represents, calibrated on its own (fusionPhysics.ts).
+        let mut p_seeded = 0.0;
+        for (frac, lz) in [(self.imp_n, lz_avg[0]), (self.imp_ne, lz_avg[1]), (self.imp_ar, lz_avg[2])] {
+            p_seeded += frac * ne_m3 * ne_m3 * lz * volume * 1e-6; // MW
+        }
+        // Radiative collapse: the radiating mantle moves inward once the total
+        // seeded fraction passes the device's threshold.
         let imp = &device.impurity_elm;
         let collapse_factor = if self.impurity_fraction > imp.impurity_collapse_threshold {
             let excess = (self.impurity_fraction - imp.impurity_collapse_threshold)
@@ -320,7 +423,7 @@ impl TransportModel {
         } else {
             1.0
         };
-        let p_impurity = self.impurity_fraction * ne_m3 * ne_m3 * lz_impurity * collapse_factor * volume * 1e-6; // MW
+        let p_impurity = p_seeded * collapse_factor;
         self.p_rad = p_brem + p_intrinsic + p_line + p_impurity;
         self.p_rad = self.p_rad.max(0.0);
 
@@ -381,7 +484,7 @@ impl TransportModel {
             * p_total_mw.powf(-0.69)
             * r0.powf(1.97)
             * eps.powf(0.58)
-            * kappa.powf(0.78)
+            * kappa_a.powf(0.78) // IPB98(y,2) is defined with the areal elongation
             * mass.powf(0.19);
 
         // Triangularity correction to confinement (not in IPB98).
@@ -396,13 +499,13 @@ impl TransportModel {
         }
 
         // DT isotope confinement enhancement beyond IPB98 M^0.19 scaling.
-        // IPB98 already includes M^0.19 which gives ~1.19× for DT (M=2.5)
-        // vs DD (M=2.0).  JET DTE2/TFTR showed ~40% total improvement,
-        // but much of this is now captured by the calibrated alpha self-
-        // heating (fix 3).  A modest 1.10× residual accounts for effects
-        // beyond alpha heating (e.g., isotope mass effect on turbulence).
-        // Total DT advantage: 1.19 (M^0.19) × 1.10 = 1.31× on tau_E,
-        // plus strong alpha self-heating feedback on Te and W_th.
+        // IPB98 already includes M^0.19, which gives (2.5/2.0)^0.19 = 1.04×
+        // for DT (M=2.5) vs DD (M=2.0).  JET DTE2/TFTR showed ~40% total
+        // improvement, but much of this is now captured by the calibrated
+        // alpha self-heating (fix 3).  A modest 1.10× residual accounts for
+        // effects beyond alpha heating (e.g., isotope mass effect on
+        // turbulence).  Total DT advantage: 1.04 (M^0.19) × 1.10 = 1.15× on
+        // tau_E, plus strong alpha self-heating feedback on Te and W_th.
         if device.mass_number > 2.0 && self.in_hmode {
             self.tau_e *= 1.10;
         }
@@ -413,19 +516,22 @@ impl TransportModel {
             self.tau_e *= 1.05;
         }
 
-        // Track peak Ip for rampdown detection
-        if ip > self.ip_peak {
-            self.ip_peak = ip;
+        // Track peak Ip for rampdown detection. With a driven current this
+        // reads the programme, so a current sagging on an exhausted solenoid
+        // or in a quench is not mistaken for the programmed termination.
+        let ip_ref = self.ip_programmed.unwrap_or(ip);
+        if ip_ref > self.ip_peak {
+            self.ip_peak = ip_ref;
         }
         // Rampdown confinement degradation: as Ip drops below its peak,
         // edge transport barrier weakens and confinement degrades toward
         // L-mode. This prevents β_N and Q from spiking during rampdown
         // because W_th decays faster as confinement drops.
         let mut h_eff = self.h_factor;
-        if self.ip_peak > 0.5 && ip < 0.90 * self.ip_peak {
+        if self.ip_peak > 0.5 && ip_ref < 0.90 * self.ip_peak {
             // Linear degradation from current h_factor toward 0.4 (below L-mode)
             // as Ip drops from 90% to 30% of peak
-            let ramp_frac = ((ip / self.ip_peak) - 0.30).max(0.0) / 0.60;
+            let ramp_frac = ((ip_ref / self.ip_peak) - 0.30).max(0.0) / 0.60;
             h_eff = 0.4 + (self.h_factor - 0.4) * ramp_frac;
         }
 
@@ -480,15 +586,15 @@ impl TransportModel {
         // Determine ELM regime based on impurity level, q95, and shaping
         let imp = &device.impurity_elm;
         self.elm_suppressed = self.in_hmode
-            && self.impurity_fraction >= imp.impurity_qce_threshold
+            && imp_gate >= imp.impurity_qce_threshold
             && prog.delta >= imp.delta_grassy_min;
         let elm_regime: u8 = if !self.in_hmode {
             0 // No ELMs outside H-mode
-        } else if self.impurity_fraction >= imp.impurity_qce_threshold
+        } else if imp_gate >= imp.impurity_qce_threshold
             && prog.delta >= imp.delta_grassy_min
         {
             0 // Suppressed → QCE (requires sufficient impurity + strong shaping)
-        } else if self.impurity_fraction >= imp.impurity_type2_threshold
+        } else if imp_gate >= imp.impurity_type2_threshold
             && self.q95 >= imp.q95_grassy_range.0
             && self.q95 <= imp.q95_grassy_range.1
             && prog.delta >= imp.delta_grassy_min
@@ -504,8 +610,8 @@ impl TransportModel {
 
             // Impurity degradation factor: reduces Type I frequency as impurity
             // approaches the Type II transition threshold (pedestal cooling effect)
-            let impurity_degradation = if self.impurity_fraction > imp.impurity_type1_onset {
-                let frac = ((self.impurity_fraction - imp.impurity_type1_onset)
+            let impurity_degradation = if imp_gate > imp.impurity_type1_onset {
+                let frac = ((imp_gate - imp.impurity_type1_onset)
                     / (imp.impurity_type2_threshold - imp.impurity_type1_onset))
                     .clamp(0.0, 1.0);
                 1.0 - 0.7 * frac // frequency drops to 30% before Type II transition
@@ -614,7 +720,7 @@ impl TransportModel {
         };
         // Fade β_N during rampdown: suppress the 1/Ip divergence smoothly
         let ip_fade = if self.ip_peak > 0.5 {
-            ((ip / self.ip_peak - 0.10) / 0.70).clamp(0.0, 1.0)
+            ((ip_ref / self.ip_peak - 0.10) / 0.70).clamp(0.0, 1.0)
         } else {
             1.0
         };
@@ -623,7 +729,7 @@ impl TransportModel {
         let max_rise = self.beta_n + 0.01;
         let new_beta_n = clamped.min(max_rise).max(0.0);
         // Track peak only during flat-top (Ip near peak)
-        if new_beta_n > self.beta_n_peak && ip > self.ip_peak * 0.90 {
+        if new_beta_n > self.beta_n_peak && ip_ref > self.ip_peak * 0.90 {
             self.beta_n_peak = new_beta_n;
         }
         // Cap at peak to prevent rampdown overshoot
@@ -660,6 +766,8 @@ mod tests {
             delta: 0.35,
             d2_puff: 0.0,
             neon_puff: 0.0,
+            n2_puff: 0.0,
+            argon_puff: 0.0,
         };
 
         // Run for 100ms
@@ -691,6 +799,8 @@ mod tests {
             delta: 0.35,
             d2_puff: 0.0,
             neon_puff: 0.0,
+            n2_puff: 0.0,
+            argon_puff: 0.0,
         };
 
         // Run for 2 seconds
@@ -723,6 +833,8 @@ mod tests {
             delta: 0.33,
             d2_puff: 0.0,
             neon_puff: 0.0,
+            n2_puff: 0.0,
+            argon_puff: 0.0,
         };
 
         // Run to quasi-steady-state
@@ -788,6 +900,8 @@ mod tests {
             delta: 0.33,
             d2_puff: 0.0,
             neon_puff: 0.0,
+            n2_puff: 0.0,
+            argon_puff: 0.0,
         };
 
         // Single step to compute alpha power at these conditions
@@ -824,6 +938,8 @@ mod tests {
             delta: 0.35,
             d2_puff: 0.0,
             neon_puff: 0.0,
+            n2_puff: 0.0,
+            argon_puff: 0.0,
         };
 
         // Run for a few seconds

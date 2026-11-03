@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SimHandle, type PresetId, getPreset, getDevice } from './wasm'
-import type { Snapshot, TracePoint, ProfileFrame, ProcessedProfile } from './types'
+import type { DisruptionCause, Snapshot, TracePoint, ProfileFrame, ProcessedProfile } from './types'
 import { processProfileFrames } from './profileUtils'
 import { computeFusion } from './fusionPhysics'
+import { deriveEvents, newLogContext, nextPulseNumber, type LogContext, type LogEvent } from './pulseLog'
 
 const DT = 0.005 // 5 ms physics timestep
+// Through the thermal and current quench the physics is stepped and recorded
+// at this resolution instead, so the Ip spike (1-3 ms) and the L/R decay
+// (5-50 ms) render as curves rather than one or two points.
+const DT_QUENCH = 0.00025
+const inQuench = (s: Snapshot | null | undefined) =>
+  !!s && s.disrupted && (s.disruption_phase === 'thermal_quench' || s.disruption_phase === 'current_quench')
 // Trace history (lightweight: ~200 bytes/entry) — large buffer for full-pulse coverage.
 // 30,000 entries ≈ 500s at 60fps (enough for ITER 400s pulses at 1x speed). ~6 MB.
 const MAX_TRACE_HISTORY = 30000
@@ -12,6 +19,13 @@ const MAX_TRACE_HISTORY = 30000
 // 8,000 entries ≈ 133s at 60fps — enough for ITER's full 100s pulse.
 // Post-pulse scrubbing uses time-based lookup. ~400 MB max.
 const MAX_SNAPSHOT_HISTORY = 8000
+
+/** The previous pulse on this device, kept as a reference trace. */
+export interface PreviousPulse {
+  number: number | null
+  deviceId: string
+  history: TracePoint[]
+}
 
 export interface SimState {
   snapshot: Snapshot | null            // live (latest) snapshot
@@ -27,6 +41,15 @@ export interface SimState {
   profileTeMax: number
   profileNeMax: number
   profilePMax: number
+  events: LogEvent[]                   // append-only control-room log for this pulse
+  pulseNumber: number | null           // issued on Start, persistent across visits
+  previousPulse: PreviousPulse | null  // last pulse's traces, for the reference overlay
+  elmCount: number
+  disruptionTime: number | null
+  /** The disruption cause as the log resolved it at the trigger; '' when none or not resolved. */
+  disruptionCause: DisruptionCause
+  /** The solenoid's flux swing ran out at some point in this pulse. */
+  fluxExhausted: boolean
 }
 
 export interface SimControls {
@@ -60,6 +83,30 @@ export function useSimulation(
   const pFusSmoothedRef = useRef(0.0) // smoothed P_fus for ELM resilience
   const profileFramesRef = useRef<ProfileFrame[]>([])
   const lastProfileTimeRef = useRef<number>(-Infinity)
+  const eventsRef = useRef<LogEvent[]>([])
+  // The last snapshot as the engine produced it. The copy kept in
+  // snapshotHistory has elm_active latched true for the whole tick, which
+  // would hide the rising edge of an ELM on the next tick's first step.
+  const lastRawSnapshotRef = useRef<Snapshot | null>(null)
+  const logCtxRef = useRef<LogContext | null>(null)
+  const pulseNumberRef = useRef<number | null>(null)
+  const previousPulseRef = useRef<PreviousPulse | null>(null)
+
+  // Keep the pulse that is about to be discarded as the reference trace,
+  // provided it ran long enough to be worth comparing against.
+  const archivePulse = () => {
+    if (historyRef.current.length > 20) {
+      previousPulseRef.current = {
+        number: pulseNumberRef.current,
+        deviceId: currentDeviceRef.current,
+        history: historyRef.current,
+      }
+    }
+    pulseNumberRef.current = null
+    eventsRef.current = []
+    logCtxRef.current = null
+    lastRawSnapshotRef.current = null
+  }
 
   const [state, setState] = useState<SimState>({
     snapshot: null,
@@ -75,10 +122,18 @@ export function useSimulation(
     profileTeMax: 0,
     profileNeMax: 0,
     profilePMax: 0,
+    events: [],
+    pulseNumber: null,
+    previousPulse: null,
+    elmCount: 0,
+    disruptionTime: null,
+    disruptionCause: '',
+    fluxExhausted: false,
   })
 
   // Create a new sim handle from a preset
   const createSim = useCallback((deviceId: string, preset: PresetId) => {
+    archivePulse()
     currentDeviceRef.current = deviceId
     const dev = getDevice(deviceId)
     if (dev && massOverrideRef.current !== null) {
@@ -123,11 +178,19 @@ export function useSimulation(
       profileTeMax: 0,
       profileNeMax: 0,
       profilePMax: 0,
+      events: [],
+      pulseNumber: null,
+      previousPulse: previousPulseRef.current,
+      elmCount: 0,
+      disruptionTime: null,
+      disruptionCause: '',
+      fluxExhausted: false,
     })
   }, [])
 
   // Create a new sim handle from custom program JSON
   const createSimFromProgram = useCallback((deviceId: string, programJson: string) => {
+    archivePulse()
     currentDeviceRef.current = deviceId
     currentDeviceObjRef.current = getDevice(deviceId)
     // Clean up old handle
@@ -162,6 +225,13 @@ export function useSimulation(
       profileTeMax: 0,
       profileNeMax: 0,
       profilePMax: 0,
+      events: [],
+      pulseNumber: null,
+      previousPulse: previousPulseRef.current,
+      elmCount: 0,
+      disruptionTime: null,
+      disruptionCause: '',
+      fluxExhausted: false,
     })
   }, [])
 
@@ -208,6 +278,48 @@ export function useSimulation(
 
     // Number of tick batches this frame: 1 at ≤1x, proportional at >1x
     const tickBatches = speed >= 1.0 ? Math.round(speed) : 1
+
+    // Build a trace point from a snapshot. `dAlpha`/`elmActive` may be latched
+    // over several sub-steps; `dtRecorded` is the simulated time this point
+    // represents, used to smooth P_fus with tau_E.
+    const makeTracePoint = (s: Snapshot, dAlpha: number, elmActive: boolean, dtRecorded: number): TracePoint => {
+      const raw = currentDeviceObjRef.current ? computeFusion(s, currentDeviceObjRef.current).p_fus : 0
+      // Fusion reactions are concentrated in the hot core, which acts as a
+      // thermal low-pass filter; edge ELM crashes don't affect the core
+      // fusion rate on ELM timescales.
+      const tau = Math.max(s.tau_e ?? 0.1, 0.05)
+      const alpha = Math.min(dtRecorded / tau, 1.0)
+      pFusSmoothedRef.current += (raw - pFusSmoothedRef.current) * alpha
+      return {
+        t: s.time,
+        ip: s.ip,
+        te0: s.te0,
+        ne_bar: s.ne_bar,
+        w_th: s.w_th,
+        p_input: s.p_input,
+        p_rad: s.p_rad,
+        p_loss: s.p_loss,
+        d_alpha: dAlpha,
+        beta_n: s.beta_n,
+        disruption_risk: s.disruption_risk,
+        li: s.li,
+        q95: s.q95,
+        v_loop: s.diagnostics.v_loop,
+        psi_oh: s.flux_consumed ?? 0,
+        i_ni: (s.i_bootstrap ?? 0) + (s.i_cd ?? 0),
+        h_factor: s.h_factor,
+        f_greenwald: s.f_greenwald,
+        ne_ped: s.ne_ped,
+        te_ped: s.te_ped,
+        ne_line: s.ne_line,
+        impurity_fraction: s.impurity_fraction,
+        p_fus: pFusSmoothedRef.current,
+        p_alpha: s.p_alpha,
+        elm_suppressed: s.elm_suppressed,
+        elm_active: elmActive,
+        in_hmode: s.in_hmode,
+      }
+    }
     let snap: Snapshot | null = null
     // Track peak Dα and any ELM across all sub-steps so that ELMs
     // are reliably captured even when many physics steps are skipped.
@@ -221,15 +333,31 @@ export function useSimulation(
     let elmType = 0
 
     const totalSteps = tickBatches * STEPS_PER_TICK
-    for (let i = 0; i < totalSteps; i++) {
-      const json = sim.step(DT)
+    // Fixed budget of simulated time per tick. Outside a quench that is
+    // totalSteps coarse steps; inside one it is many fine steps, each of
+    // which is recorded as its own trace point.
+    const budget = totalSteps * DT
+    let advanced = 0
+    let lastWasFine = false
+    let prev: Snapshot | null = lastRawSnapshotRef.current ?? snapshotHistoryRef.current[snapshotHistoryRef.current.length - 1] ?? null
+    while (advanced < budget - 1e-9) {
+      const fine = inQuench(prev)
+      const dt = fine ? DT_QUENCH : DT
+      const json = sim.step(dt)
       snap = JSON.parse(json)
+      advanced += dt
+      lastWasFine = fine
       if (snap) {
+        if (logCtxRef.current) deriveEvents(prev, snap, logCtxRef.current, eventsRef.current)
+        prev = snap
         if (snap.diagnostics.d_alpha > maxDAlpha) maxDAlpha = snap.diagnostics.d_alpha
         if (snap.elm_active) {
           anyElmActive = true
           elmType = snap.elm_type ?? elmType
           elmEnergyLoss = Math.max(snap.elm_energy_loss ?? 0, elmEnergyLoss)
+        }
+        if (fine) {
+          historyRef.current.push(makeTracePoint(snap, snap.diagnostics.d_alpha, snap.elm_active, dt))
         }
       }
       if (snap && (snap.status === 'Complete' || snap.status === 'Disrupted')) {
@@ -237,6 +365,8 @@ export function useSimulation(
         break
       }
     }
+
+    if (snap) lastRawSnapshotRef.current = { ...snap }
 
     // Patch the final snapshot with latched ELM state from any sub-step
     if (snap && anyElmActive) {
@@ -246,46 +376,11 @@ export function useSimulation(
     }
 
     if (snap) {
-      // Append to trace history ring buffer (lightweight — large limit)
-      // Use peak d_alpha and any-ELM flag from all sub-steps for reliable display
-      const pt: TracePoint = {
-        t: snap.time,
-        ip: snap.ip,
-        te0: snap.te0,
-        ne_bar: snap.ne_bar,
-        w_th: snap.w_th,
-        p_input: snap.p_input,
-        p_rad: snap.p_rad,
-        p_loss: snap.p_loss,
-        d_alpha: maxDAlpha,
-        beta_n: snap.beta_n,
-        disruption_risk: snap.disruption_risk,
-        li: snap.li,
-        q95: snap.q95,
-        v_loop: snap.diagnostics.v_loop,
-        h_factor: snap.h_factor,
-        f_greenwald: snap.f_greenwald,
-        ne_ped: snap.ne_ped,
-        te_ped: snap.te_ped,
-        ne_line: snap.ne_line,
-        impurity_fraction: snap.impurity_fraction,
-        p_fus: (() => {
-          const raw = currentDeviceObjRef.current
-            ? computeFusion(snap!, currentDeviceObjRef.current).p_fus : 0
-          // Smooth P_fus with tau_E to filter ELM-scale fluctuations.
-          // Fusion reactions are concentrated in the hot core, which acts
-          // as a thermal low-pass filter — edge ELM crashes don't affect
-          // core fusion rate on ELM timescales.
-          const tau = Math.max(snap!.tau_e ?? 0.1, 0.05)
-          const dt = totalSteps * DT
-          const alpha = Math.min(dt / tau, 1.0)
-          pFusSmoothedRef.current += (raw - pFusSmoothedRef.current) * alpha
-          return pFusSmoothedRef.current
-        })(),
-        elm_suppressed: snap.elm_suppressed,
-        elm_active: anyElmActive,
+      // Append the tick-level trace point, unless the quench loop above has
+      // already recorded this snapshot at fine resolution.
+      if (!lastWasFine) {
+        historyRef.current.push(makeTracePoint(snap, maxDAlpha, anyElmActive, totalSteps * DT))
       }
-      historyRef.current.push(pt)
       if (historyRef.current.length > MAX_TRACE_HISTORY) {
         historyRef.current = historyRef.current.slice(-MAX_TRACE_HISTORY)
       }
@@ -337,6 +432,13 @@ export function useSimulation(
           profileTeMax,
           profileNeMax,
           profilePMax,
+          events: eventsRef.current,
+          pulseNumber: pulseNumberRef.current,
+          previousPulse: previousPulseRef.current,
+          elmCount: logCtxRef.current?.elmCount ?? 0,
+          disruptionTime: logCtxRef.current?.disruptionTime ?? null,
+          disruptionCause: logCtxRef.current?.disruptionCause ?? '',
+          fluxExhausted: logCtxRef.current?.fluxExhausted ?? false,
         }
       })
     }
@@ -348,8 +450,21 @@ export function useSimulation(
 
   const start = useCallback(() => {
     if (!simRef.current) return
+    // A fresh pulse (nothing recorded yet) gets the next pulse number and a
+    // new log; resuming from Pause keeps both.
+    if (pulseNumberRef.current === null) {
+      pulseNumberRef.current = nextPulseNumber()
+      eventsRef.current = []
+      let program = null
+      try { program = JSON.parse(programJsonRef.current) } catch { /* no programme */ }
+      logCtxRef.current = newLogContext(
+        pulseNumberRef.current,
+        currentDeviceObjRef.current?.name ?? currentDeviceRef.current,
+        program,
+      )
+    }
     runningRef.current = true
-    setState((s) => ({ ...s, running: true }))
+    setState((s) => ({ ...s, running: true, pulseNumber: pulseNumberRef.current, events: eventsRef.current }))
     rafRef.current = requestAnimationFrame(tick)
   }, [tick])
 
@@ -365,6 +480,7 @@ export function useSimulation(
     if (simRef.current) {
       simRef.current.reset()
     }
+    archivePulse()
     historyRef.current = []
     pFusSmoothedRef.current = 0
     snapshotHistoryRef.current = []
@@ -383,6 +499,13 @@ export function useSimulation(
       profileTeMax: 0,
       profileNeMax: 0,
       profilePMax: 0,
+      events: [],
+      pulseNumber: null,
+      previousPulse: previousPulseRef.current,
+      elmCount: 0,
+      disruptionTime: null,
+      disruptionCause: '',
+      fluxExhausted: false,
     }))
   }, [])
 

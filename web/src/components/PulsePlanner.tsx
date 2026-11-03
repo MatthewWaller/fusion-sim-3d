@@ -15,6 +15,8 @@ import {
   type MagneticConfig,
   type OverrideValue,
   type ScalarParam,
+  paramRange,
+  channelAvailable,
 } from '../lib/program'
 
 /* ─── Types ─────────────────────────────────────────────── */
@@ -130,13 +132,15 @@ export default function PulsePlanner({
     p_ech: '#8b5cf6',
     ne: '#a78bfa',
     d2_puff: '#60a5fa',
-    neon_puff: '#86efac',
+    n2_puff: '#2dd4bf',
+    neon_puff: '#fb923c',
+    argon_puff: '#818cf8',
     kappa: '#f59e0b',
     delta: '#ef4444',
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-96 bg-gray-900 border-l border-gray-700 z-50
+    <div className="fixed inset-y-0 right-0 w-full md:w-96 bg-gray-900 border-l border-gray-700 z-50
                     flex flex-col shadow-2xl shadow-black/50">
       {/* Header */}
       {/* border-gray-700, not -800: `.border-b.border-gray-800` in index.css is
@@ -148,7 +152,9 @@ export default function PulsePlanner({
         </div>
         <button
           onClick={onClose}
-          className="text-gray-500 hover:text-gray-300 transition-colors cursor-pointer text-lg"
+          aria-label="Close planner"
+          className="text-gray-500 hover:text-gray-300 transition-colors cursor-pointer text-lg
+                     inline-flex items-center justify-center max-md:min-w-11 max-md:min-h-11 max-md:-my-2 max-md:-mr-2"
         >
           ✕
         </button>
@@ -167,7 +173,7 @@ export default function PulsePlanner({
               <button
                 key={p}
                 onClick={() => onPresetChange(p)}
-                className={`flex-1 px-2 py-1.5 text-sm transition-colors cursor-pointer
+                className={`flex-1 px-2 py-1.5 text-sm transition-colors cursor-pointer max-md:min-h-11
                   ${
                     basePreset === p
                       ? 'bg-amber-600 text-white'
@@ -195,7 +201,7 @@ export default function PulsePlanner({
                 <button
                   key={cfg}
                   onClick={() => onConfigChange(configOverride === cfg ? null : cfg)}
-                  className={`flex-1 px-2 py-1.5 text-sm transition-colors cursor-pointer
+                  className={`flex-1 px-2 py-1.5 text-sm transition-colors cursor-pointer max-md:min-h-11
                     ${
                       configOverride === cfg
                         ? 'bg-purple-600 text-white'
@@ -222,7 +228,7 @@ export default function PulsePlanner({
               step={DURATION_MAX[deviceId] && DURATION_MAX[deviceId] > 30 ? 5 : 0.5}
               value={effectiveDuration}
               onChange={(e) => onDurationChange(parseFloat(e.target.value))}
-              className="flex-1 accent-cyan-500"
+              className="flex-1 accent-cyan-500 max-md:min-h-11"
             />
             <input
               type="number"
@@ -231,7 +237,7 @@ export default function PulsePlanner({
               step={DURATION_MAX[deviceId] && DURATION_MAX[deviceId] > 30 ? 5 : 0.5}
               value={effectiveDuration}
               onChange={(e) => onDurationChange(parseFloat(e.target.value) || baseProgram.duration)}
-              className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs
+              className="w-16 max-md:min-h-11 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs
                          text-cyan-400 font-mono tabular-nums text-right focus:outline-none focus:border-cyan-600"
             />
             <span className="text-xs text-gray-500 w-4">s</span>
@@ -239,10 +245,11 @@ export default function PulsePlanner({
         </div>
 
         {/* Scalar parameter editors */}
-        {SCALAR_PARAMS.map((param) => {
+        {SCALAR_PARAMS.filter((param) => channelAvailable(param.key, deviceId)).map((param) => {
           const value = getEffectiveValue(param)
           const waveform = getEffectiveWaveform(param)
           const color = paramColors[param.key] ?? '#94a3b8'
+          const range = paramRange(param, device)
 
           return (
             <div key={param.key}>
@@ -252,7 +259,7 @@ export default function PulsePlanner({
                 </label>
                 <button
                   onClick={() => setDrawingParam(param.key)}
-                  className="relative cursor-pointer rounded"
+                  className="relative cursor-pointer rounded max-md:min-h-11 max-md:inline-flex max-md:items-center"
                   title="Click to draw waveform"
                 >
                   <WaveformSparkline waveform={waveform} color={color} />
@@ -261,9 +268,9 @@ export default function PulsePlanner({
               <div className="flex items-center gap-2 mt-1">
                 <input
                   type="range"
-                  min={param.min}
-                  max={param.max}
-                  step={param.step}
+                  min={range.min}
+                  max={range.max}
+                  step={range.step}
                   value={value}
                   onChange={(e) =>
                     onOverridesChange({
@@ -271,13 +278,13 @@ export default function PulsePlanner({
                       [param.key]: parseFloat(e.target.value),
                     })
                   }
-                  className="flex-1 accent-cyan-500"
+                  className="flex-1 accent-cyan-500 max-md:min-h-11"
                 />
                 <input
                   type="number"
-                  min={param.min}
-                  max={param.max}
-                  step={param.step}
+                  min={range.min}
+                  max={range.max}
+                  step={range.step}
                   value={value.toFixed(param.precision)}
                   onChange={(e) =>
                     onOverridesChange({
@@ -285,7 +292,7 @@ export default function PulsePlanner({
                       [param.key]: parseFloat(e.target.value) || 0,
                     })
                   }
-                  className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs
+                  className="w-16 max-md:min-h-11 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs
                              text-cyan-400 font-mono tabular-nums text-right focus:outline-none focus:border-cyan-600"
                 />
                 <span className="text-xs text-gray-500 w-14 truncate">{param.unit}</span>
@@ -306,14 +313,14 @@ export default function PulsePlanner({
       <div className="p-3 border-t border-gray-800 space-y-2">
         <button
           onClick={() => { onOverridesChange({}); onDurationChange(null); onConfigChange(null) }}
-          className="w-full px-4 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm
+          className="w-full px-4 py-1.5 max-md:min-h-11 bg-gray-700 hover:bg-gray-600 rounded text-sm
                      transition-colors cursor-pointer"
         >
           ↺ Reset parameters
         </button>
         <button
           onClick={handleRun}
-          className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded text-sm
+          className="w-full px-4 py-2 max-md:min-h-11 bg-cyan-600 hover:bg-cyan-500 rounded text-sm
                      transition-colors cursor-pointer"
         >
           ▶ Run pulse
@@ -335,8 +342,8 @@ export default function PulsePlanner({
             label={param.label}
             unit={param.unit}
             color={paramColors[param.key] ?? '#94a3b8'}
-            min={param.min}
-            max={param.max}
+            min={paramRange(param, device).min}
+            max={paramRange(param, device).max}
             onSave={(wf) => {
               onOverridesChange({ ...overrides, [param.key]: wf })
               setDrawingParam(null)

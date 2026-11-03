@@ -116,6 +116,27 @@ for exploring tokamak plasma behavior.
   flux with surface temperature modeling
 - **Post-pulse analysis:** Time scrubbing, radial profile viewer with
   synthetic Thomson scattering
+- **Impurity seeding:** Nitrogen, neon and argon gas lines per machine, with
+  ADAS cooling curves for core radiation, Z_eff and dilution, a
+  Goldston-Reinke-Schwartz detachment threshold, and a radiating divertor
+  front tinted by the seeded species
+- **Hall audio (opt-in):** Synthesized machine sounds from the torus hall,
+  driven by the live state: coil and converter hum at the site's mains
+  frequency, flywheel generators sagging under load, beam-line noise, the
+  cryoplant on superconducting machines, and the thud of a disruption. A
+  separately labeled sonified D-alpha channel clicks once per ELM. Off by
+  default; the plasma itself is silent
+- **Pulse sonification (opt-in):** The pulse as sound, labeled as such: a
+  converter whine whose pitch climbs with the current ramp and whose level
+  follows the Ohmic drive power, a sub-100 Hz rumble from the power crossing
+  the separatrix, a broadband roar that follows the divertor heat flux and
+  surges when the divertor lights up at the L-H transition, and a neutron
+  detector whose Poisson crackle gates the whole layer as the fusion power
+  rises. A DD pulse ticks; a DT burn crackles
+- **Pulse record:** Persistent pulse numbers, an append-only event log with
+  alarm severities, a named cause and operator action for every disruption,
+  an achieved-versus-programmed report, and the previous pulse as a reference
+  trace
 
 ## Physics Models
 
@@ -166,8 +187,8 @@ cd web && npx vite preview
 wasm-pack build crates/tok-sym-core \
   --target web \
   --out-dir ../../web/src/wasm \
-  --features wasm \
-  -- --no-default-features
+  --no-default-features \
+  --features wasm
 
 # Start frontend dev server (with hot reload)
 cd web
@@ -183,8 +204,15 @@ The dev server runs at `http://localhost:5173` by default.
 # Exploration Room geometry tests (standalone, like the upstream TS test)
 cd web && npx tsx src/components/exploration/fluxGeometry.test.ts
 
-# Rust physics engine tests
-cargo test -p tok-sym-core
+# Rust physics engine tests (full-pulse tests are slow in debug; use --release)
+cargo test --release -p tok-sym-core
+
+# Envelope sweep: every planner control at five levels on every device and
+# preset, run through the engine and checked for plausibility (~5 min on 6
+# cores). Regenerate the program matrix whenever a preset, a slider range or
+# the program builder changes; the matrix check fails when it is stale.
+cargo test --release -p tok-sym-core --test envelope -- --nocapture
+cd web && npm run matrix:emit && npm run matrix:check
 
 # TypeScript type checking
 cd web && npx tsc -b
@@ -268,11 +296,10 @@ divertor heat flux via Bosch-Hale and Eich scaling).
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE). (Upstream's README said MIT at the time of
-the fork, but its LICENSE file is GPL-3.0; this fork follows the LICENSE file.)
+GNU General Public License v3.0 (GPL-3.0-only). See [LICENSE](LICENSE) for details.
 
 ## Attribution
 
 Developed by Daniel Burgess and the Columbia Fusion Research Center.
 
-Copyright 2026 Daniel Burgess. All rights reserved.
+Copyright 2026 Daniel Burgess. Released under the GPL-3.0 license.

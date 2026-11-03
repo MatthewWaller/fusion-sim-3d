@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback } from 'react'
 import type { Snapshot, Contour } from '../lib/types'
 import InfoPopup from './InfoPopup'
 import { equilibriumInfo } from './infoContent'
+import { themeColors } from '../lib/themeColors'
 import { useSettings } from '../lib/settingsContext'
 
 interface Props {
@@ -62,8 +63,9 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     const W = rect.width
     const H = rect.height
 
+    const tc = themeColors()
     // Clear
-    ctx.fillStyle = isRetro ? '#000000' : '#0e0f11'
+    ctx.fillStyle = isRetro ? '#000000' : tc.base
     ctx.fillRect(0, 0, W, H)
 
     // Use limiter as wall boundary when provided, otherwise parse wallJson
@@ -79,7 +81,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     }
 
     if (wall.length === 0) {
-      ctx.fillStyle = '#4b5563'
+      ctx.fillStyle = tc.inkFaint
       ctx.font = '14px monospace'
       ctx.textAlign = 'center'
       ctx.fillText('No equilibrium data', W / 2, H / 2)
@@ -151,7 +153,9 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
           const g = Math.round(100 + (1 - t) * 155)
           ctx.strokeStyle = `rgb(0,${g},0)`
         } else {
-          ctx.strokeStyle = fluxColor(t)
+          // On a light field the top of the inferno ramp is too pale to read,
+          // so clamp it: the core stays orange, the edge dark.
+          ctx.strokeStyle = tc.light ? fluxColor(t * 0.15 + 0.15) : fluxColor(t)
         }
         ctx.lineWidth = isRetro ? 1.0 : 1.2
         ctx.globalAlpha = isRetro ? 0.8 : 0.7
@@ -169,6 +173,10 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
           ctx.lineWidth = 2
           ctx.shadowColor = '#33ff33'
           ctx.shadowBlur = 4
+        } else if (tc.light) {
+          ctx.strokeStyle = '#b45309' // dark amber: yellow vanishes on paper
+          ctx.lineWidth = 2
+          ctx.shadowBlur = 0
         } else {
           ctx.strokeStyle = '#facc15' // bright yellow
           ctx.lineWidth = 2
@@ -197,7 +205,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     }
 
     // --- Draw wall outline ---
-    ctx.strokeStyle = isRetro ? '#555555' : '#6b7280'
+    ctx.strokeStyle = isRetro ? '#555555' : tc.inkFaint
     ctx.lineWidth = 2
     buildWallPath()
     ctx.stroke()
@@ -292,7 +300,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     while (rTick <= rMax + rStep * 0.01) {
       const x = toX(rTick)
       // Faint vertical grid line
-      ctx.strokeStyle = isRetro ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.04)'
+      ctx.strokeStyle = isRetro ? 'rgba(255,255,255,0.15)' : tc.grid(tc.light ? 0.07 : 0.04)
       ctx.beginPath()
       ctx.moveTo(x, toY(zMax))
       ctx.lineTo(x, bottomEdge)
@@ -304,7 +312,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       ctx.lineTo(x, bottomEdge + 4)
       ctx.stroke()
       // Label
-      ctx.fillStyle = '#6b7280'
+      ctx.fillStyle = tc.inkFaint
       ctx.font = '9px monospace'
       ctx.fillText(rTick.toFixed(1), x, bottomEdge + 5)
       rTick = Math.round((rTick + rStep) * 1000) / 1000
@@ -320,7 +328,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     while (zTick <= zMax + zStep * 0.01) {
       const y = toY(zTick)
       // Faint horizontal grid line
-      ctx.strokeStyle = isRetro ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.04)'
+      ctx.strokeStyle = isRetro ? 'rgba(255,255,255,0.15)' : tc.grid(tc.light ? 0.07 : 0.04)
       ctx.beginPath()
       ctx.moveTo(leftEdge, y)
       ctx.lineTo(toX(rMax), y)
@@ -332,14 +340,14 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
       ctx.lineTo(leftEdge - 4, y)
       ctx.stroke()
       // Label
-      ctx.fillStyle = '#6b7280'
+      ctx.fillStyle = tc.inkFaint
       ctx.font = '9px monospace'
       ctx.fillText(zTick.toFixed(1), leftEdge - 6, y)
       zTick = Math.round((zTick + zStep) * 1000) / 1000
     }
 
     // Axis unit labels
-    ctx.fillStyle = '#4b5563'
+    ctx.fillStyle = tc.inkFaint
     ctx.font = '9px monospace'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
@@ -352,8 +360,8 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
     ctx.restore()
 
     // --- Labels ---
-    const labelColor = isRetro ? '#1a801a' : '#9ca3af'
-    const labelHighlight = isRetro ? '#ffb000' : '#e0a23a'
+    const labelColor = isRetro ? '#1a801a' : tc.inkDim
+    const labelHighlight = isRetro ? '#ffb000' : tc.accent
     ctx.fillStyle = labelColor
     ctx.font = isRetro ? '11px "VCR OSD Mono", "Courier New", monospace' : '11px monospace'
     ctx.textAlign = 'left'
@@ -400,7 +408,7 @@ export default function EquilibriumCanvas({ snapshot, wallJson, limiterPoints }:
         ctx.fillStyle = isRetro ? '#ccaa00' : '#f59e0b'
         ctx.fillText('Limited', labelX, labelY)
       } else {
-        ctx.fillStyle = '#6b7280'
+        ctx.fillStyle = tc.inkFaint
         ctx.fillText('Diverted', labelX, labelY)
       }
     }
@@ -450,9 +458,29 @@ function extendLegsToWall(
   toX: (r: number) => number,
   toY: (z: number) => number,
   jumpThresh: number,
-  maxExtend = 0.5,
+  // The Rust side now clips the separatrix at its first wall impact, so leg
+  // ends normally sit ON the wall and need no extension at all. This pass
+  // survives only as a short gap-bridger for walls whose display polygon
+  // differs slightly from the physics wall — hence the tight cap. The old
+  // 0.5 m reach let the tangent ray fly from an already-landed strike point
+  // clear across the divertor throat to the far baffle, drawing the "leg
+  // through the limiter" glitch.
+  maxExtend = 0.08,
 ) {
   if (points.length < 4 || wall.length < 3) return
+
+  const distToWall = (px: number, py: number): number => {
+    let best = Infinity
+    for (let i = 0; i < wall.length; i++) {
+      const a = wall[i]
+      const b = wall[(i + 1) % wall.length]
+      const dx = b[0] - a[0], dy = b[1] - a[1]
+      const l2 = dx * dx + dy * dy
+      const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / l2)) : 0
+      best = Math.min(best, Math.hypot(px - a[0] - t * dx, py - a[1] - t * dy))
+    }
+    return best
+  }
 
   // Forward ray (unit dir d from p) vs wall polygon → nearest hit point or null.
   const rayHit = (px: number, py: number, dx: number, dy: number): [number, number] | null => {
@@ -489,6 +517,10 @@ function extendLegsToWall(
   if (cur.length) chains.push(cur)
 
   const extend = (end: [number, number], back: [number, number]) => {
+    // Already terminated on the wall (the normal case with Rust-side leg
+    // clipping, which lands ends within ~3 mm of the boundary) — nothing to
+    // extend, and extending would draw across in-vessel space.
+    if (distToWall(end[0], end[1]) < 0.012) return
     let dx = end[0] - back[0]
     let dy = end[1] - back[1]
     const n = Math.hypot(dx, dy)

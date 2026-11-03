@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ComponentType } from 'react'
 import { useParams, useSearchParams, useLocation } from 'react-router-dom'
 import { useSimulation } from '../lib/useSimulation'
+import { useHallAudio } from '../lib/useHallAudio'
 import { getDevices, type PresetId } from '../lib/wasm'
 import type { MagneticConfig, OverrideValue, ProgramHandoff } from '../lib/program'
+import { useSettings, LOOKS, type Look } from '../lib/settingsContext'
 import EquilibriumCanvas from '../components/EquilibriumCanvas'
 import UnifiedTracePanel from '../components/UnifiedTracePanel'
 import StatusPanel from '../components/StatusPanel'
@@ -11,10 +13,26 @@ import PortView from '../components/portview'
 import ExplorationRoom from '../components/exploration'
 import SettingsDropdown from '../components/SettingsDropdown'
 import TutorialOverlay from '../components/TutorialOverlay'
+import FirstRunCard from '../components/FirstRunCard'
+import { FIRSTRUN_EVENT, firstRunPending } from '../lib/firstRun'
+import EventLog from '../components/EventLog'
+import { buildReport } from '../lib/pulseLog'
 import { DIIID_LIMITER } from '../lib/diiid-geometry'
 import { JET_LIMITER } from '../lib/jet-geometry'
 import { ITER_LIMITER } from '../lib/iter-geometry'
 import { CENTAUR_LIMITER } from '../lib/centaur-geometry'
+import type { ControlRoomContext } from './compositions/types'
+import CompositionDiiid from './compositions/diiid'
+import CompositionApollo from './compositions/apollo'
+import CompositionJet from './compositions/jet'
+import CompositionKaldera from './compositions/kaldera'
+
+const COMPOSITIONS: Record<string, ComponentType<{ ctx: ControlRoomContext }>> = {
+  diiid: CompositionDiiid,
+  apollo: CompositionApollo,
+  jet: CompositionJet,
+  kaldera: CompositionKaldera,
+}
 
 const DEVICE_LIMITERS: Record<string, [number, number][]> = {
   diiid: DIIID_LIMITER,
@@ -57,20 +75,58 @@ export default function ControlRoom() {
     }, { replace: true, state: location.state })
   }
 
-  // A programme edited on the pulse page arrives as router state.
+  // The control room renders one of the compositions. The look chosen in
+  // settings (program page or the settings menu) is the default; ?layout=
+  // overrides it, and ?layout=classic shows the pre-composition page.
+  const { look } = useSettings()
+  const layoutParam = searchParams.get('layout')
+  // The first-run card's hover preview overrides the look for rendering only; nothing is stored.
+  const [previewLook, setPreviewLook] = useState<Look | null>(null)
+  const resolvedLayout = layoutParam ?? previewLook ?? look
+  const LayoutComponent = resolvedLayout === 'classic' ? undefined : (COMPOSITIONS[resolvedLayout] ?? COMPOSITIONS.kaldera)
+
+  // A program edited on the pulse page arrives as router state.
   const location = useLocation()
   const rawHandoff = (location.state ?? null) as ProgramHandoff | null
   const handoff = typeof rawHandoff?.programJson === 'string' ? rawHandoff : null
+  // A ?layout= link that differs from the stored look pins the view; the settings
+  // menu says so and offers to drop the parameter (other parameters are kept).
+  const layoutFixed = layoutParam !== null && layoutParam !== look
+  const releaseLayout = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('layout')
+    setSearchParams(next, { replace: true, state: location.state })
+  }
+  // Name the pinned layout as the settings menu does; an unknown slug renders the Modern look.
+  const layoutLabel = layoutParam === 'classic' ? 'Classic' : (LOOKS.find((l) => l.id === layoutParam)?.label ?? 'Modern')
+  const layoutLock = layoutFixed ? { label: layoutLabel, onRelease: releaseLayout } : undefined
 
   // Local state so user can switch without navigating
   const [tutorialActive, setTutorialActive] = useState(showTutorial)
+  // The first-run card (sound, look, tour) shows until it has been dismissed once;
+  // the settings menu's "First-run setup" clears the key and fires FIRSTRUN_EVENT.
+  const [firstRunOpen, setFirstRunOpen] = useState(() => !showTutorial && firstRunPending())
+  useEffect(() => {
+    const reopen = () => { setTutorialActive(false); setFirstRunOpen(true) }
+    window.addEventListener(FIRSTRUN_EVENT, reopen)
+    return () => window.removeEventListener(FIRSTRUN_EVENT, reopen)
+  }, [])
+  // Warm the other looks' faces so the first hover preview on the card does not
+  // flash fallback type. The @font-face rules come from the compositions' CSS
+  // (diiid.css: Courier Prime, apollo.css: VT323, jet.css: Cousine); loading
+  // them here only fetches the files.
+  useEffect(() => {
+    if (!document.fonts?.load) return
+    const faces = ['400 13px "Courier Prime"', '700 13px "Courier Prime"', '17px "VT323"', '400 11px "Cousine"', '700 11px "Cousine"', '400 13px "Mona Sans"']
+    Promise.all(faces.map((f) => document.fonts.load(f))).catch(() => {})
+  }, [])
   const [activeDevice, setActiveDevice] = useState(routeDeviceId ?? 'diiid')
   const [activePreset, setActivePreset] = useState<PresetId>(routePreset)
   const [showPlanner, setShowPlanner] = useState(false)
   const [activeSpeed, setActiveSpeed] = useState(1.0)
 
   // Persistent Pulse Planner state — survives open/close of the drawer, and
-  // is seeded from the hand-off so the planner opens on the edited programme.
+  // is seeded from the hand-off so the planner opens on the edited program.
   const [plannerOverrides, setPlannerOverrides] = useState<Record<string, OverrideValue>>(handoff?.overrides ?? {})
   const [plannerDuration, setPlannerDuration] = useState<number | null>(handoff?.durationOverride ?? null)
   const [plannerPreset, setPlannerPreset] = useState<PresetId>(handoff?.presetId ?? routePreset)
@@ -82,6 +138,15 @@ export default function ControlRoom() {
   const devices = useMemo(() => getDevices(), [])
 
   const [state, controls] = useSimulation(activeDevice, activePreset)
+  // Opt-in machine sounds, driven by the live state; primed on the Start click.
+  const activeDeviceObj = useMemo(() => devices.find((d) => d.id === activeDevice) ?? null, [devices, activeDevice])
+  const audio = useHallAudio(state, activeDeviceObj)
+  // Every look starts the pulse through these controls, so the audio context is
+  // primed inside that click wherever the Start control lives.
+  const roomControls = useMemo(
+    () => ({ ...controls, start: () => { audio.prime(); controls.start() } }),
+    [controls, audio],
+  )
   const {
     displaySnapshot,
     history,
@@ -90,9 +155,28 @@ export default function ControlRoom() {
     programJson,
     scrubTime,
     finished,
+    events,
+    pulseNumber,
+    previousPulse,
   } = state
 
-  // Load a programme edited on the pulse page. runProgram builds the sim but
+  // Achieved-versus-programmed report, built once the pulse has ended.
+  const report = useMemo(() => {
+    if (!finished || history.length === 0) return null
+    return buildReport({
+      history,
+      programJson,
+      disrupted: !!state.snapshot?.disrupted,
+      // the cause as the log resolved it at the trigger ('' → "not resolved")
+      cause: state.disruptionCause,
+      disruptionTime: state.disruptionTime,
+      elmCount: state.elmCount,
+      fluxBudget: state.snapshot?.flux_budget,
+      fluxExhausted: state.fluxExhausted,
+    })
+  }, [finished, history, programJson, state.snapshot, state.disruptionTime, state.disruptionCause, state.elmCount, state.fluxExhausted])
+
+  // Load a program edited on the pulse page. runProgram builds the sim but
   // leaves it stopped, so the control room waits on Start as it always does.
   // Deliberately NOT guarded with a ref: under StrictMode's mount/unmount/
   // remount, useSimulation recreates the preset sim on the remount, so a
@@ -193,15 +277,83 @@ export default function ControlRoom() {
     setConfigOverride(null)
   }
 
+  const plannerNode = showPlanner ? (
+    <PulsePlanner
+      deviceId={activeDevice}
+      onRun={handleRunProgram}
+      onClose={() => setShowPlanner(false)}
+      overrides={plannerOverrides}
+      onOverridesChange={setPlannerOverrides}
+      durationOverride={plannerDuration}
+      onDurationChange={setPlannerDuration}
+      basePreset={plannerPreset}
+      onPresetChange={handlePlannerPresetChange}
+      configOverride={configOverride}
+      onConfigChange={setConfigOverride}
+    />
+  ) : null
+
+  // Room switch: 2D control room vs 3D Exploration Room. Shown in the classic
+  // top bar and next to the settings menu in every composition.
+  const viewSwitchNode = (
+    <div className="flex shrink-0 rounded overflow-hidden border border-gray-700" role="group" aria-label="View">
+      {([['control', 'Control', 'Control room'], ['explore', '3D', 'Exploration Room (3D)']] as const).map(([v, short, title]) => (
+        <button
+          key={v}
+          onClick={() => setView(v)}
+          title={title}
+          aria-pressed={view === v}
+          className={`px-1.5 sm:px-2 py-1 text-sm font-medium transition-colors cursor-pointer
+            ${view === v
+              ? 'bg-cyan-700 text-white'
+              : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+            }`}
+        >
+          {v === 'explore' ? <><span className="sm:hidden">{short}</span><span className="hidden sm:inline">3D Exploration</span></> : short}
+        </button>
+      ))}
+    </div>
+  )
+
+  // The 3D room has no composition of its own: in explore view every layout
+  // falls through to the classic page, whose top bar carries the switch back.
+  if (LayoutComponent && view === 'control') {
+    const ctx: ControlRoomContext = {
+      state, controls: roomControls, displaySnapshot, history, running, finished, scrubTime, wallJson, programJson,
+      events, pulseNumber, previousPulse, report, plasmaSnapshot, limiterPoints, usesIch,
+      time, duration, progress,
+      activeDevice, devices, onDeviceChange: handleDeviceChange,
+      activePreset, presets: getPresets(activeDevice), onPresetChange: handlePresetChange,
+      fuelType, showsFuelToggle: activeDevice === 'jet' || activeDevice === 'iter', onFuelChange: handleFuelChange,
+      activeSpeed, onSpeedChange: handleSpeedChange, hasCustomProgram,
+      showPlanner, togglePlanner: () => setShowPlanner((v) => !v), plannerNode,
+      settingsNode: (
+        <span className="inline-flex items-center gap-1 sm:gap-2">
+          {viewSwitchNode}
+          <SettingsDropdown onRestartTutorial={() => setTutorialActive(true)} layoutLock={layoutLock} />
+        </span>
+      ),
+      tutorialNode: tutorialActive ? <TutorialOverlay onComplete={() => setTutorialActive(false)} /> : null,
+    }
+    return (
+      <>
+        <LayoutComponent ctx={ctx} />
+        {firstRunOpen && (
+          <FirstRunCard onClose={() => setFirstRunOpen(false)} onStartTour={() => setTutorialActive(true)} onPreview={setPreviewLook} fixedByLink={layoutParam !== null} />
+        )}
+      </>
+    )
+  }
+
   return (
     <div className="page-enter h-screen flex flex-col bg-[#0a0e17] overflow-hidden">
       {/* ─── Top bar ─── */}
       {/* Three-column grid rather than justify-between: the side columns take
           an equal share of the free space, so the playback controls stay
-          centred on the page even as the side content changes width (DD/DT
+          centered on the page even as the side content changes width (DD/DT
           toggle appearing per device, "(done)" suffix at end of pulse). */}
       {/* Below md the bar is two rows: selectors and time/settings on the first,
-          playback centred on its own full-width second row. A single row is
+          playback centered on its own full-width second row. A single row is
           wider than a phone and the root clips overflow, so the right-hand
           controls were cut off and could not be scrolled to. */}
       <div className="relative z-50 grid grid-cols-[1fr_auto] md:grid-cols-[1fr_auto_1fr] items-center px-2 sm:px-3 py-1 sm:py-1.5 border-b border-gray-800 gap-x-1 sm:gap-x-2 gap-y-1">
@@ -263,7 +415,7 @@ export default function ControlRoom() {
                         col-span-2 row-start-2 md:col-span-1 md:col-start-2 md:row-start-1">
           {!running ? (
             <button
-              onClick={controls.start}
+              onClick={roomControls.start}
               className="px-2 sm:px-3 py-1 bg-cyan-600 hover:bg-cyan-500 rounded text-sm
                          transition-colors cursor-pointer flex items-center justify-center gap-1 min-w-[4.5rem] sm:min-w-[5rem]"
             >
@@ -326,25 +478,11 @@ export default function ControlRoom() {
 
         {/* Time readout + room switch + Settings */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0 justify-self-end col-start-2 row-start-1 md:col-start-3">
-          {/* Room switch: 2D control room vs 3D Exploration Room */}
-          <div className="flex rounded overflow-hidden border border-gray-700" role="group" aria-label="View">
-            {([['control', 'Control', 'Control room'], ['explore', '3D', 'Exploration Room (3D)']] as const).map(([v, short, title]) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                title={title}
-                aria-pressed={view === v}
-                className={`px-1.5 sm:px-2 py-1 text-sm font-medium transition-colors cursor-pointer
-                  ${view === v
-                    ? 'bg-cyan-700 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                  }`}
-              >
-                {v === 'explore' ? <><span className="sm:hidden">{short}</span><span className="hidden sm:inline">3D Exploration</span></> : short}
-              </button>
-            ))}
-          </div>
+          {viewSwitchNode}
           <div className="text-xs text-gray-400 whitespace-nowrap">
+            <span className="text-gray-500">Pulse </span>
+            <span className="font-mono tabular-nums">{pulseNumber ?? '—'}</span>
+            <span className="text-gray-600 mx-1.5">·</span>
             t=<span className="font-mono tabular-nums">{time.toFixed(3)}</span>s
             {' / '}
             <span className="font-mono tabular-nums">{duration.toFixed(1)}</span>s
@@ -354,7 +492,7 @@ export default function ControlRoom() {
               </span>
             )}
           </div>
-          <SettingsDropdown onRestartTutorial={() => setTutorialActive(true)} />
+          <SettingsDropdown onRestartTutorial={() => setTutorialActive(true)} layoutLock={layoutLock} />
         </div>
       </div>
 
@@ -362,8 +500,11 @@ export default function ControlRoom() {
           6px bar below the grid, where the bottom row could overrun it and
           the last status readouts ended up underneath. ─── */}
       <div className="h-px bg-gray-900 shrink-0" aria-hidden="true">
+        {/* No CSS transition: the width is retargeted every animation frame,
+            and an eased transition restarted that often holds the bar back
+            and then lets it catch up in a jump whenever a frame is late. */}
         <div
-          className="h-full bg-cyan-500 transition-[width] duration-100"
+          className="h-full bg-cyan-500"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -389,7 +530,7 @@ export default function ControlRoom() {
       {/* Balanced 2x3: equilibrium top-left, traces across the top right,
           status spanning the bottom under the equilibrium, port view bottom
           right. Cells carry no card chrome; the 1px grid gap over the base
-          colour does all the separating. */}
+          color does all the separating. */}
       <div className="min-w-[768px] h-full grid grid-cols-[1fr_1.5fr_1fr] grid-rows-[minmax(0,1.1fr)_minmax(0,1fr)] gap-px min-h-0 bg-[var(--c-line)]">
         {/* Top-left: Equilibrium cross-section (single cell) */}
         <div data-tutorial="equilibrium" className="stagger-1 panel-cell">
@@ -407,6 +548,7 @@ export default function ControlRoom() {
             scrubTime={scrubTime}
             onScrub={controls.setScrubTime}
             elmActive={displaySnapshot?.elm_active ?? false}
+            reference={previousPulse}
           />
         </div>
 
@@ -438,6 +580,15 @@ export default function ControlRoom() {
       </div>
       </div>
       )}
+
+      {/* ─── Event log strip: sequence record and end-of-pulse report ─── */}
+      <EventLog
+        key={pulseNumber ?? 'idle'}
+        events={events}
+        pulseNumber={pulseNumber}
+        running={running}
+        report={report}
+      />
 
       {/* ─── Pulse Planner drawer ─── */}
       {showPlanner && (

@@ -6,6 +6,8 @@ import InfoPopup from './InfoPopup'
 import { plasmaParamsInfo, stabilityInfo, powerBalanceInfo, divertorInfo, neutronDiagnosticInfo } from './infoContent'
 import { getDevice } from '../lib/wasm'
 import { computeFusion, computeDivertorHeatFlux, DivertorThermalModel, formatNeutronRate, formatQ, neutronSignalLevel, type FusionState, type DivertorState } from '../lib/fusionPhysics'
+import { FLUX_WARN, reconstructionValid } from '../lib/pulseLog'
+import { betaTone, fmtHazard, hazardPct, hazardTone, regimeTone, T_WARN, W_RECRYST_TEMP, type Regime } from '../lib/limits'
 
 interface Props {
   snapshot: Snapshot | null
@@ -130,6 +132,16 @@ export default function StatusPanel({
   }
 
   const s = snapshot
+  // CENTAUR runs a negative-triangularity edge: no L-H transition and no
+  // ELMs, with confinement between L- and H-mode. Its regime is neither.
+  const ntEdge = s.device_id === 'centaur'
+  // Reconstructed quantities (profile shape, normalised pressure, confinement
+  // factor) have no meaning without a plasma: below 0.1 MA and after the
+  // current quench they are shown as INVALID rather than as a number.
+  const invalid = !reconstructionValid(s)
+  // Solenoid flux used, as a fraction of the device's swing. Once the swing
+  // is gone the current is no longer driven, so this reads like a fuel gauge.
+  const fluxFrac = (s.flux_budget ?? 0) > 0 ? Math.min(1, (s.flux_consumed ?? 0) / (s.flux_budget as number)) : 0
 
   return (
     <div className="px-3 py-1 text-xs h-full overflow-y-auto flex flex-col">
@@ -141,10 +153,12 @@ export default function StatusPanel({
               ? 'bg-red-900 text-red-300'
               : s.in_hmode
                 ? 'bg-cyan-900 text-cyan-300'
-                : 'bg-gray-800 text-gray-300'
+                : ntEdge
+                  ? 'bg-gray-800 text-cyan-300'
+                  : 'bg-gray-800 text-gray-300'
           }`}
         >
-          {s.disrupted ? 'DISRUPTED' : s.in_hmode ? 'H-MODE' : 'L-MODE'}
+          {s.disrupted ? 'DISRUPTED' : s.in_hmode ? 'H-MODE' : ntEdge ? 'NT-EDGE' : 'L-MODE'}
         </span>
         {/* Disruption risk bar */}
         <DisruptionRisk risk={s.disruption_risk} />
@@ -155,7 +169,7 @@ export default function StatusPanel({
               <button
                 onClick={() => canShowProfiles && setShowProfiles(!showProfiles)}
                 disabled={!canShowProfiles}
-                className={`px-2.5 py-1 rounded text-sm font-medium border transition-colors ${
+                className={`px-2.5 py-0.5 rounded text-sm font-medium border transition-colors ${
                   !canShowProfiles
                     ? 'bg-gray-800/50 border-transparent text-gray-600 cursor-not-allowed'
                     : showProfiles
@@ -222,22 +236,25 @@ export default function StatusPanel({
             <InfoPopup title="Stability Limits" position="left">{stabilityInfo}</InfoPopup>
           </span>
         </div>
-        <div className="grid grid-cols-3 gap-x-3 gap-y-0.5">
+        <div className="grid grid-cols-4 gap-x-3 gap-y-0.5">
           <Param label={<>I<sub>p</sub></>} value={s.ip} unit="MA" />
           <Param label={<>T<sub>e0</sub></>} value={s.te0} unit="keV" />
-          <Param label={<>q<sub>95</sub></>} value={s.q95} unit="" warn={s.q95 < 2.5} danger={s.q95 < 2.0} />
+          <Param label={<>Z<sub>eff</sub></>} value={s.z_eff ?? 0} unit="" invalid={invalid} warn={(s.z_eff ?? 0) > 2.5} danger={(s.z_eff ?? 0) > 3.5} />
+          <Param label={<>q<sub>95</sub></>} value={s.q95} unit="" warn={s.q95 < 2.5} danger={s.q95 < 2.0} invalid={invalid} />
 
           <Param label={<>B<sub>t</sub></>} value={s.bt} unit="T" />
           <Param label={<><span style={{ textDecoration: 'overline' }}>n</span><sub>e</sub></>} value={s.ne_bar} unit="10²⁰" />
-          <Param label={<>β<sub>N</sub></>} value={s.beta_n} unit="" warn={s.beta_n > 2.5} danger={s.beta_n > 2.8} />
+          <Param label={<>c<sub>z</sub></>} value={100 * ((s.imp_n ?? 0) + (s.imp_ne ?? 0) + (s.imp_ar ?? 0))} unit="%" invalid={invalid} />
+          <Param label={<>β<sub>N</sub></>} value={s.beta_n} unit="" warn={betaTone(s.beta_n, s) === 'warn'} danger={betaTone(s.beta_n, s) === 'bad'} invalid={invalid} />
 
           <Param label={<>W<sub>th</sub></>} value={s.w_th} unit="MJ" />
-          <Param label={<>τ<sub>E</sub></>} value={s.tau_e} unit="s" />
-          <Param label={<>f<sub>GW</sub></>} value={s.f_greenwald} unit="" warn={s.f_greenwald > 0.8} danger={s.f_greenwald > 0.9} />
-
-          <Param label={<>H<sub>98</sub></>} value={s.h_factor} unit="" />
-          <Param label={<>l<sub>i</sub></>} value={s.li} unit="" />
+          <Param label={<>τ<sub>E</sub></>} value={s.tau_e} unit="s" invalid={invalid} />
           <Param label={<>V<sub>loop</sub></>} value={s.diagnostics.v_loop} unit="V" />
+          <Param label={<>f<sub>GW</sub></>} value={s.f_greenwald} unit="" warn={s.f_greenwald > 0.8} danger={s.f_greenwald > 0.9} invalid={invalid} />
+
+          <Param label={<>H<sub>98</sub></>} value={s.h_factor} unit="" invalid={invalid} />
+          <Param label={<>l<sub>i</sub></>} value={s.li} unit="" invalid={invalid} />
+          <Param label={<>Ψ<sub>OH</sub></>} value={100 * fluxFrac} unit="%" precision={0} warn={fluxFrac > FLUX_WARN} danger={!!s.flux_exhausted || fluxFrac >= 1} />
         </div>
       </div>
 
@@ -255,7 +272,7 @@ export default function StatusPanel({
       </div>
 
       {/* Divertor thermal loading */}
-      <DivertorLoading divertor={divertor} />
+      <DivertorLoading divertor={divertor} invalid={invalid} divertorActive={s.xpoint_r > 0 && s.ip >= 0.1} />
 
       {/* Neutron diagnostic + Q display side by side */}
       <div className="flex gap-2 border-t border-gray-800 pt-1.5">
@@ -339,6 +356,8 @@ function PowerBalance({ snapshot: s, fusion, usesIch }: { snapshot: Snapshot; fu
 // ── Q_plasma display ─────────────────────────────────────────────────
 
 function QDisplay({ fusion }: { fusion: FusionState | null }) {
+  // null below 0.5 MW of external heating: Q is shown as a dash and the filter holds
+  const qDefined = fusion?.q_plasma != null
   const rawQ = fusion?.q_plasma ?? 0
   const rawPFus = fusion?.p_fus ?? 0
 
@@ -351,11 +370,11 @@ function QDisplay({ fusion }: { fusion: FusionState | null }) {
     smoothQ.current = 0
     smoothPFus.current = 0
   } else {
-    smoothQ.current += alpha * (rawQ - smoothQ.current)
+    if (qDefined) smoothQ.current += alpha * (rawQ - smoothQ.current)
     smoothPFus.current += alpha * (rawPFus - smoothPFus.current)
   }
 
-  const q = smoothQ.current
+  const q = qDefined ? smoothQ.current : 0
   const pFus = smoothPFus.current
 
   // Color coding for Q
@@ -378,14 +397,14 @@ function QDisplay({ fusion }: { fusion: FusionState | null }) {
     : '\u2007\u2007\u2007— MW'
 
   return (
-    <div className={`rounded border px-2.5 py-1.5 text-center min-w-[84px] shrink-0 ${borderColor}`}>
-      <div className="text-xs text-gray-500 leading-tight">Q<sub>plasma</sub></div>
-      <div className={`text-lg font-mono font-semibold tabular-nums leading-tight ${qColor}`}>
-        {formatQ(q)}
-      </div>
-      <div className="text-xs text-gray-500 leading-none mt-0.5 whitespace-nowrap">
-        <span>P<sub>fus</sub></span> <span className="font-mono tabular-nums">{pFusStr}</span>
-      </div>
+    <div className={`rounded border px-2.5 py-1 flex items-baseline gap-2 shrink-0 self-start whitespace-nowrap ${borderColor}`}>
+      <span className="text-xs text-gray-500">Q<sub>plasma</sub></span>
+      <span className={`text-lg font-mono font-semibold tabular-nums leading-tight min-w-[3em] text-right ${qColor}`}>
+        {qDefined ? formatQ(q) : '—'}
+      </span>
+      <span className="text-xs text-gray-500 ml-1">
+        P<sub>fus</sub> <span className="font-mono tabular-nums">{pFusStr}</span>
+      </span>
     </div>
   )
 }
@@ -449,30 +468,29 @@ function NeutronDiagnostic({ fusion }: { fusion: FusionState | null }) {
         </span>
       </div>
 
-      {/* Signal bar */}
-      <div className="flex gap-0.5 mb-1">
-        {Array.from({ length: numBars }, (_, i) => {
-          const barActive = i < activeBars
-          const barColor = i < 3 ? 'var(--c-ok)' : i < 6 ? 'var(--c-warn)' : 'var(--c-bad)'
-          return (
-            <div
-              key={i}
-              className="flex-1 h-2.5 rounded-sm transition-all duration-300"
-              style={{
-                backgroundColor: barActive ? barColor : 'var(--c-line)',
-                opacity: barActive ? 1 : 0.6,
-              }}
-            />
-          )
-        })}
-      </div>
-
-      {/* Values — fixed-layout flex to prevent side-to-side jitter */}
-      <div className="flex items-center justify-between">
-        <span className={`text-xs ${isActive ? 'text-gray-200' : 'text-gray-500'}`}>
+      {/* Signal bar with the readouts beside it, like the divertor rows */}
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 gap-0.5 min-w-0">
+          {Array.from({ length: numBars }, (_, i) => {
+            const barActive = i < activeBars
+            const barColor = i < 3 ? 'var(--c-ok)' : i < 6 ? 'var(--c-warn)' : 'var(--c-bad)'
+            return (
+              <div
+                key={i}
+                className="flex-1 h-2.5 rounded-sm transition-all duration-300"
+                style={{
+                  backgroundColor: barActive ? barColor : 'var(--c-line)',
+                  opacity: barActive ? 1 : 0.6,
+                }}
+              />
+            )
+          })}
+        </div>
+        {/* Fixed-width readouts so the bar does not jitter as digits change */}
+        <span className={`text-xs w-24 text-right shrink-0 whitespace-nowrap ${isActive ? 'text-gray-200' : 'text-gray-500'}`}>
           <span className="font-mono tabular-nums">{rate > 0 ? formatNeutronRate(rate) : '—'}</span> n/s
         </span>
-        <span className="text-xs text-gray-500 font-mono tabular-nums">
+        <span className="text-xs text-gray-500 font-mono tabular-nums w-16 text-right shrink-0">
           {powerStr}
         </span>
       </div>
@@ -482,16 +500,16 @@ function NeutronDiagnostic({ fusion }: { fusion: FusionState | null }) {
 
 // ── Divertor Thermal Loading ─────────────────────────────────────────
 
-/** Tungsten recrystallization temperature threshold (°C). */
-const W_RECRYST_TEMP = 1300
-
 /** Tungsten recrystallization heat flux threshold (MW/m²) — approximate steady-state limit. */
 const W_RECRYST_QFLUX = 10
 
-function DivertorLoading({ divertor }: { divertor: DivertorState | null }) {
+function DivertorLoading({ divertor, invalid = false, divertorActive = false }: { divertor: DivertorState | null; invalid?: boolean; divertorActive?: boolean }) {
   const q = divertor?.q_peak ?? 0
   const lambda = divertor?.lambda_q ?? 0
   const fDet = divertor?.f_detach ?? 0
+  // λq and f_det are derived from the plasma; without one they are noise.
+  const invalidStyle = invalid ? { color: 'var(--c-invalid)' } : undefined
+  const invalidTitle = invalid ? 'No plasma: scrape-off layer quantities invalid' : undefined
   const tSurface = divertor?.t_surface ?? 0
   const wallMat = divertor?.wall_material ?? 'W'
   const isW = wallMat === 'W'
@@ -506,7 +524,7 @@ function DivertorLoading({ divertor }: { divertor: DivertorState | null }) {
   // Dynamic scale: 2000°C normally, expands if ELMs push higher
   const maxTemp = Math.max(2000, tSurface * 1.2)
   const fracT = Math.min(tSurface / maxTemp, 1)
-  const tempBarColor = tSurface > W_RECRYST_TEMP ? 'var(--c-bad)' : tSurface > 600 ? 'var(--c-warn)' : 'var(--c-ok)'
+  const tempBarColor = tSurface > W_RECRYST_TEMP ? 'var(--c-bad)' : tSurface >= T_WARN ? 'var(--c-warn)' : 'var(--c-ok)'
   const isTempWarning = isW && tSurface > W_RECRYST_TEMP
 
   const isWarning = (isW && q > W_RECRYST_QFLUX) || isTempWarning
@@ -514,7 +532,7 @@ function DivertorLoading({ divertor }: { divertor: DivertorState | null }) {
   // Bars can use the saturated token; the numeric readouts next to them are
   // small text, so they use the AA-safe ink variant of the alarm red.
   const qInkColor = q > W_RECRYST_QFLUX ? 'var(--c-bad-ink)' : q > 5 ? 'var(--c-warn)' : 'var(--c-ok)'
-  const tempInkColor = tSurface > W_RECRYST_TEMP ? 'var(--c-bad-ink)' : tSurface > 600 ? 'var(--c-warn)' : 'var(--c-ok)'
+  const tempInkColor = tSurface > W_RECRYST_TEMP ? 'var(--c-bad-ink)' : tSurface >= T_WARN ? 'var(--c-warn)' : 'var(--c-ok)'
 
   return (
     <div className="border-t border-gray-800 pt-1.5">
@@ -523,12 +541,21 @@ function DivertorLoading({ divertor }: { divertor: DivertorState | null }) {
           Divertor
           <InfoPopup title="Divertor Thermal Loading" position="right">{divertorInfo}</InfoPopup>
         </span>
-        <span className="text-xs text-gray-600">
-          λ<sub>q</sub>=<span className="font-mono tabular-nums">{lambda.toFixed(1)}</span> mm
+        <span className="text-xs text-gray-600" style={invalidStyle} title={invalidTitle}>
+          λ<sub>q</sub>=<span className="font-mono tabular-nums">{invalid ? '—' : lambda.toFixed(1)}</span> mm
         </span>
-        <span className="text-xs text-gray-600 ml-auto">
-          f<sub>det</sub>=<span className="font-mono tabular-nums">{fDet.toFixed(2)}</span>
+        {/* Recrystallization warning sits in the header row (nothing to its
+            right depends on its width), so no vertical space is reserved. */}
+        {isW && (
+          <span className="flex items-center gap-1 ml-2" style={{ visibility: isWarning ? 'visible' : 'hidden' }}>
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: 'var(--c-bad)' }} />
+            <span className="text-xs text-red-400">W recrystallization risk</span>
+          </span>
+        )}
+        <span className="text-xs text-gray-600 ml-auto" style={invalidStyle} title={invalidTitle}>
+          f<sub>det</sub>=<span className="font-mono tabular-nums">{invalid ? '—' : fDet.toFixed(2)}</span>
         </span>
+        <DetachmentTag fDet={fDet} q={q} active={divertorActive} />
       </div>
 
       {/* Heat flux bar */}
@@ -579,18 +606,54 @@ function DivertorLoading({ divertor }: { divertor: DivertorState | null }) {
         </div>
       )}
 
-      {/* Warning indicator for tungsten recrystallization — always reserve
-          the vertical space so the panel doesn't shift when it appears/disappears. */}
-      {isW && (
-        <div className="flex items-center gap-1 mt-0.5" style={{ minHeight: 14, visibility: isWarning ? 'visible' : 'hidden' }}>
-          <span
-            className="w-2 h-2 rounded-full shrink-0"
-            style={{ backgroundColor: 'var(--c-bad)' }}
-          />
-          <span className="text-xs text-red-400">W recrystallization risk</span>
-        </div>
-      )}
     </div>
+  )
+}
+
+/** Divertor regime from the detachment fraction. Thresholds match the point
+ *  where the port view's radiation front has visibly lifted off the target. */
+type DivertorRegime = 'attached' | 'partial' | 'detached'
+function divertorRegime(fDet: number): DivertorRegime {
+  return fDet >= 0.6 ? 'detached' : fDet >= 0.3 ? 'partial' : 'attached'
+}
+
+/**
+ * Static state tag for the divertor regime (ATTACHED / PARTIAL / DETACHED),
+ * the same pattern as the neutron detector's Active/Idle tag. A regime
+ * change is marked once, with a single highlight that fades over a second,
+ * rather than a blinking element: the control room keeps nothing blinking
+ * that is not an unacknowledged alarm.
+ */
+function DetachmentTag({ fDet, q, active }: { fDet: number; q: number; active: boolean }) {
+  const regime = active ? divertorRegime(fDet) : null
+  // Highlight only an actual change of regime, not the first render: the
+  // panel mounts afresh on every pulse start and device switch. The one-shot
+  // animation is restarted imperatively so no state update is needed.
+  const prevRef = useRef<DivertorRegime | null>(null)
+  const elRef = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    const el = elRef.current
+    if (el && regime !== null && prevRef.current !== null && regime !== prevRef.current) {
+      el.classList.remove('state-change')
+      void el.offsetWidth // restart the animation
+      el.classList.add('state-change')
+    }
+    prevRef.current = regime
+  }, [regime])
+  const label = regime === 'detached' ? 'Detached' : regime === 'partial' ? 'Partial' : regime === 'attached' ? 'Attached' : '—'
+  // the tone every look uses: partial and detached are neutral, attached is amber above 5 MW/m²
+  const tone = regimeTone((regime === null ? '—' : regime.toUpperCase()) as Regime, q)
+  const color = tone === 'warn' ? 'var(--c-warn)' : regime === null ? 'var(--c-ink-faint)' : 'var(--c-ink-dim)'
+  const dot = tone === 'warn' ? 'var(--c-warn)' : regime === null ? 'var(--c-line-strong)' : 'var(--c-ink-dim)'
+  return (
+    <span
+      ref={elRef}
+      className="ml-2 flex items-center gap-1 shrink-0"
+      title={regime === null ? 'No diverted plasma' : 'Divertor regime from the detachment fraction'}
+    >
+      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: dot }} />
+      <span className="text-[10px] uppercase tracking-wider" style={{ color }}>{label}</span>
+    </span>
   )
 }
 
@@ -598,16 +661,18 @@ function DivertorLoading({ divertor }: { divertor: DivertorState | null }) {
 
 /** Compact disruption risk indicator. */
 function DisruptionRisk({ risk }: { risk: number }) {
-  const pct = Math.min(risk * 100, 100)
+  const pct = Math.min(hazardPct(risk), 100)
+  // the shared bands: amber from 1 %/s, red from 10 %/s
+  const tone = hazardTone(risk)
   const barColor =
-    pct > 60 ? 'var(--c-bad)' : pct > 30 ? 'var(--c-warn)' : 'var(--c-ok)'
+    tone === 'bad' ? 'var(--c-bad)' : tone === 'warn' ? 'var(--c-warn)' : 'var(--c-ok)'
   // Small text needs the AA-safe ink variant of the alarm red.
   const inkColor =
-    pct > 60 ? 'var(--c-bad-ink)' : pct > 30 ? 'var(--c-warn)' : 'var(--c-ok)'
+    tone === 'bad' ? 'var(--c-bad-ink)' : tone === 'warn' ? 'var(--c-warn)' : 'var(--c-ok)'
 
   return (
     <div className="flex items-center gap-1.5 flex-1 min-w-0">
-      <span className="text-xs text-gray-500">Disruption risk</span>
+      <span className="text-xs text-gray-500">Disruption hazard</span>
       <div className="w-24 h-2.5 bg-gray-800 rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-300"
@@ -615,10 +680,10 @@ function DisruptionRisk({ risk }: { risk: number }) {
         />
       </div>
       <span
-        className="text-xs font-mono font-medium tabular-nums w-8"
+        className="text-xs font-mono font-medium tabular-nums w-14 whitespace-nowrap"
         style={{ color: inkColor }}
       >
-        {pct.toFixed(0)}%
+        {fmtHazard(risk)}<span className="text-gray-500">%/s</span>
       </span>
     </div>
   )
@@ -631,6 +696,7 @@ function Param({
   precision = 2,
   warn = false,
   danger = false,
+  invalid = false,
 }: {
   label: React.ReactNode
   value: number
@@ -638,13 +704,19 @@ function Param({
   precision?: number
   warn?: boolean
   danger?: boolean
+  /** No physical meaning right now (no plasma): shown as a magenta dash. */
+  invalid?: boolean
 }) {
-  const color = danger ? 'text-red-400' : warn ? 'text-yellow-400' : 'text-gray-200'
-  const formatted = value.toFixed(precision)
+  const color = invalid ? '' : danger ? 'text-red-400' : warn ? 'text-yellow-400' : 'text-gray-200'
+  const formatted = invalid ? '—' : value.toFixed(precision)
   return (
     <div className="flex justify-between items-baseline leading-none py-px">
       <span className="text-gray-500">{label}</span>
-      <span className={color}>
+      <span
+        className={color}
+        style={invalid ? { color: 'var(--c-invalid)' } : undefined}
+        title={invalid ? 'No plasma: equilibrium reconstruction invalid' : undefined}
+      >
         <span className="font-mono tabular-nums inline-block min-w-[3.5em] text-right">{formatted}</span>
         <span className="text-gray-600 ml-0.5 text-xs inline-block min-w-[2.5em] unit-label">{unit}</span>
       </span>

@@ -47,6 +47,10 @@
      so alarm TEXT uses a lifted variant; fills/borders keep --c-bad.
      #dd7059 = 5.54:1 on --c-surface, 5.03:1 on --c-raised. */
   --c-bad-ink:     #dd7059;
+  /* INVALID (EPICS/ISA-101 convention): a readout with no physical meaning,
+     e.g. a reconstructed quantity with no plasma. Magenta so it is never
+     confused with an alarm. #c98bd0 = 6.3:1 on --c-surface. */
+  --c-invalid:     #c98bd0;
 
   /* Legacy aliases — kept so any component reading these via var() still
      resolves to the new palette. */
@@ -185,6 +189,7 @@ body {
 button.bg-cyan-600,
 button.bg-amber-600,
 button.bg-gray-700,
+button.bg-purple-600,
 button.bg-purple-700,
 button.bg-emerald-600 {
   font-family: var(--font-sans);
@@ -210,6 +215,7 @@ button.bg-cyan-600:hover {
 /* Pause / Reset / Edit — neutral, warm border on hover */
 button.bg-amber-600,
 button.bg-gray-700,
+button.bg-purple-600,
 button.bg-purple-700 {
   background: var(--c-raised);
   border: 1px solid var(--c-line);
@@ -217,6 +223,7 @@ button.bg-purple-700 {
 }
 button.bg-amber-600:hover,
 button.bg-gray-700:hover,
+button.bg-purple-600:hover,
 button.bg-purple-700:hover { border-color: var(--c-accent); color: var(--c-ink); }
 
 /* Fuel toggle (active state) */
@@ -271,6 +278,12 @@ input[type="range"]:active::-moz-range-thumb     { background: var(--c-accent); 
 .flex.rounded.overflow-hidden.border.border-gray-700 {
   border: 1px solid var(--c-line);
   border-radius: 0;
+}
+.flex.rounded.overflow-hidden.border.border-gray-700 button {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
 }
 .flex.rounded.overflow-hidden.border.border-gray-700 button.bg-gray-800 {
   background: var(--c-raised);
@@ -420,6 +433,14 @@ a:focus-visible {
 .page-enter { animation: pageFadeIn 0.25s ease-out both; }
 
 @keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+/* One-shot highlight when a state tag changes value: lifts to the accent
+   and settles over ~1.2 s. Not a blink; it runs once per change. */
+@keyframes stateChange {
+  0%   { filter: brightness(2.2); text-shadow: 0 0 6px var(--c-accent-hi); }
+  100% { filter: brightness(1);   text-shadow: none; }
+}
+.state-change { animation: stateChange 1.2s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .state-change { animation: none; } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 .tutorial-card { animation: slideUp 0.4s ease-out; }
 
@@ -456,6 +477,7 @@ html[data-theme="retro"] {
   --c-accent: #33ff33;
   --c-accent-hi: #66ff66;
   --c-bad-ink: var(--c-bad);
+  --c-invalid: #d070d0;
 }
 
 [data-theme="retro"] body {
@@ -487,6 +509,7 @@ html[data-theme="retro"] {
 }
 [data-theme="retro"] button.bg-gray-700,
 [data-theme="retro"] button.bg-amber-600,
+[data-theme="retro"] button.bg-purple-600,
 [data-theme="retro"] button.bg-purple-700 {
   border-radius: 0;
 }

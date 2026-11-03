@@ -139,6 +139,14 @@ power excluding self-heating from alpha particles).
 
 ---
 
+The displayed Q is faded to zero as the programmed current drops below
+30 % of **this pulse's flat-top current** (the peak of the programmed Ip
+waveform), and capped at 15, to suppress the ramp-down artefact where
+external heating is cut before the stored energy has decayed. The
+reference is the pulse's own flat-top, not the machine's maximum rating,
+so a machine run below its rated current is not penalised.
+
+
 ## 3. ELM Model
 
 ### 3.1 ELM Types
@@ -199,12 +207,151 @@ is broadened by a factor of 1.0-2.0 depending on the triangularity magnitude.
 
 ### 4.2 Detachment Model
 
-A simplified sigmoid model for divertor detachment:
+Detachment needs the divertor to radiate away most of the power crossing
+the separatrix. Goldston, Reinke and Schwartz argue that the impurity
+cooling that does this is set by the upstream density, which is itself tied
+to the Greenwald limit, and find that the impurity fraction required for
+detachment scales as
 
-    f_detach = min(1 - 1/(1 + (f_GW/0.7)^6), 0.97)
+    c_z,det ∝ P_sep / [ <B_p> (1 + κ95²)^(3/2) (n_sep / n_GW)² ]
+    <B_p>   = μ0 I_p / [ 2π a √((1 + κ95²)/2) ]
 
-Higher Greenwald fraction drives stronger divertor radiation and detachment,
-reducing the target heat flux. Maximum detachment reduces heat flux by 97%.
+with no explicit dependence on machine size (their eq. 9). The model uses
+this form with its constant fixed by their comparison case, the ASDEX
+Upgrade model case of Kallenbach et al. (PPCF 58, 2016, 045013),
+calibrated against AUG data and partially detached: P_sep = 10.7 MW,
+<B_p> = 0.34 T, κ95 = 1.63, n_sep/n_GW = 0.486, c_N = 4 % in the divertor
+(their Table 2). The devices here carry the separatrix elongation; the
+model maps it to κ95 ≈ 1 + 0.75 (κ_sep − 1), which reproduces ITER's 1.8.
+
+P_sep is the transport loss power less core radiation, floored at the
+engine's own H-L back-transition power, 0.8 P_LH (the device-adjusted
+Martin threshold the transport model uses). The scaling was built on
+H-mode SOL widths and heat fluxes and its threshold fraction vanishes as
+P_sep → 0, which would call a cold ohmic ramp-up fully detached; with the
+floor the scaling is applied as published throughout H-mode and only the
+L-mode and ohmic phases are regularized. Where the floor is active the
+density dependence is weaker than f_GW², because P_LH rises with density.
+The floor applies only where H-mode is accessible at all (P_LH within the
+heating power): CENTAUR's negative-triangularity edge carries a threshold
+factor of 3 precisely so that it never is, and takes the scaling as is.
+
+Three stated assumptions convert the calibration to the quantities the
+engine carries (each seeded species is counted in nitrogen-equivalent
+units):
+
+- the separatrix density is taken as n_sep = 0.6 n̄_e (the engine carries
+  the line-averaged Greenwald fraction);
+- the species differ in how much parallel heat flux a given fraction can
+  dissipate: at the calibration case's impurity lifetime (nτ = 5e16 s/m³)
+  GRS fig. 1d puts neon about 1.9× and argon about 2.4× above nitrogen in
+  q_det/(n √F_z), that is about 3.6× and 6× in F_z; the weights used are
+  nitrogen 1, neon 3.5, argon 6;
+- the divertor is enriched in seeded impurities relative to the core by a
+  factor of about 3 (an assumption, taken the same for every species; the
+  engine's seeded fractions are core fractions).
+
+### 4.3 Seeded impurity species
+
+Three seeding species are modeled, nitrogen, neon and argon, each with its
+own core fraction c_z accumulating from its gas line (10²⁰ atoms/s, 30 %
+reaching the core per unit n_e V, 0.5 s confinement time). Their atomic
+physics comes from OpenADAS adf11 data (tools/adas_cooling/): the coronal
+ionization balance at n_e = 1e20 m⁻³ gives the mean charge <Z>(T_e) and
+<Z²>(T_e), and the line, recombination and bremsstrahlung power
+coefficients give the cooling curve L_z(T_e) in W m³. The engine
+averages them over an assumed temperature profile,
+T(ρ) = T_e0 [0.85 (1 − ρ²)^1.5 + 0.15 (1 − ρ⁸)] + 5 eV with n(ρ) ∝ 1 − 0.4 ρ²
+(radiation weighted by n² dV, charge states by n dV), because the cooler
+mantle radiates several times more than the axis for the low-Z species.
+They give
+
+- core radiation, P_rad,z = c_z n_e² <L_z> V: nitrogen and neon radiate
+  little at keV temperatures (divertor radiators), argon keeps a few
+  10⁻³³ W m³ into the keV range (a mantle radiator). The seeded species'
+  own bremsstrahlung is inside L_z, so the separate bremsstrahlung term
+  uses the intrinsic Z_eff only;
+- the effective charge, Z_eff = Z_eff,intrinsic + Σ c_z (<Z²> − <Z>),
+  which raises the resistivity and is shown on the status panel;
+- fuel dilution, n_fuel/n_e = 1 − Σ c_z <Z>, which lowers the fusion rate
+  in the engine and in the displayed fusion power.
+
+The ELM-regime gates (QCE access, type II, type I degradation) were
+calibrated on neon and read the seeded content in neon-equivalent units
+with the same weights as the detachment model; the radiative collapse
+threshold reads the total fraction.
+
+What the seeded species radiate in the divertor and scrape-off layer is not
+in the core power balance; it is the dissipation the detachment model
+represents, calibrated on its own. The curves are coronal: in a cold,
+dense divertor with finite impurity residence time the low-Z species
+radiate more (non-coronal enhancement), which the detachment calibration
+absorbs. The P_rad readouts and the bolometer show the core part only.
+Intrinsic and fuel radiation are unchanged, so unseeded pulses are
+unaffected.
+
+Each machine exposes the gas lines it has, or would have: DIII-D and JET
+nitrogen, neon and argon; ITER neon and argon (nitrogen forms ammonia with
+tritium); CENTAUR nitrogen and neon, following the species SPARC's
+divertor paper scales (Kuang et al. 2020). The port view tints the
+radiating front by the visible lines of what is radiating: deuterium pink,
+nitrogen's N II green-teal, neon's orange-red, argon's Ar II blue-violet.
+
+
+Intrinsic radiators (fuel Balmer and Lyman light, wall impurities) are
+represented as an equivalent core fraction c_int in nitrogen units,
+defined as the threshold of an unseeded DIII-D-like H-mode (1.5 MA,
+a = 0.56 m, κ_sep = 1.7, P_sep = 4.4 MW) at f_GW = 0.7, about 0.7 %
+nitrogen-equivalent, so that pulse is half detached there, where the
+earlier density-only sigmoid put it. Then
+
+    D = (c_int + c_z) / c_z,det
+    f_detach = min(1 − 1 / (1 + D³), 0.97)
+
+Because c_z,det falls as f_GW², the density dependence at fixed power is
+the same (f_GW/f_0)^6 shape as the earlier model. What is new: detachment
+gets harder with separatrix power and easier with plasma current (poloidal
+field) and shaping, as the scaling says; seeding (c_z from the gas lines in the
+transport model, 0.5 s confinement, in nitrogen-equivalent units) can
+bring it on at any density;
+and the large machines are no longer detached for free at high density.
+Through the engine at 60 % of each H-mode preset, seeding from 30 % of
+the pulse: an unseeded DIII-D flat-top (P_sep 3.9 MW, f_GW 0.55) is 15 %
+detached (19 % before); 0.3e20 atoms/s of nitrogen takes it to 39 % at
+Z_eff 1.63 with the core radiation unchanged, the same rate of neon to
+76 % at Z_eff 1.76, and the same rate of argon to 96 % but at Z_eff 2.16
+with a core radiated fraction of 0.45 that collapses the pulse in its
+ramp-down (0.1e20/s of argon is the useful level). Two per cent of
+nitrogen never collapses the core but dilutes the fuel to 86 %; two per
+cent of neon or one per cent of argon end in radiative collapse. An
+unseeded ITER flat-top (P_sep 36 MW, f_GW 0.8) is 25 % detached (69 %
+before) and 10e20/s of neon takes it to 72 % at Z_eff 1.82, while 5e20/s
+of argon collapses it; 1e20/s of neon on CENTAUR takes it from 22 % to
+60 % and costs 7 MW of fusion power through dilution.
+
+The planner's gas channels (D₂ puff and the nitrogen, neon and argon
+seeding lines) scale their range with plasma volume so the same fraction
+is reachable on every machine; the seeding rates are in 10²⁰ atoms per
+second (a nitrogen molecule counts as two).
+
+Known limitation: the divertor part of the seeded radiation is not fed
+back into the core power balance or the bolometer; the species weights
+come from one figure of one paper at one impurity lifetime, and the
+sound-speed factor ((1+Z̄)/Ā)^½ of GRS eq. 10, under 3 % between species
+at these fractions, is ignored; the radiation profile average uses an
+assumed profile shape rather than the engine's own profiles.
+
+Maximum detachment reduces the target heat flux by 97 %. The port view
+draws the radiation front moving up the divertor leg with f_detach, and the
+status panel's Divertor row reports Attached / Partial / Detached at
+f_detach = 0.3 and 0.6.
+
+**References:**
+- Goldston, Reinke and Schwartz, Plasma Phys. Control. Fusion 59 (2017) 055015
+- Kallenbach et al., Plasma Phys. Control. Fusion 58 (2016) 045013 (the calibration case)
+- Martin et al., J. Phys.: Conf. Ser. 123 (2008) 012033 (L-H threshold scaling)
+- OpenADAS, open.adas.ac.uk (adf11 scd/acd/plt/prb for N, Ne, Ar), H. P. Summers et al.
+- Kuang et al., J. Plasma Phys. 86 (2020) 865860505 (SPARC divertor; nitrogen and neon fractions)
 
 ---
 
@@ -319,8 +466,50 @@ Disruptions are triggered when operational limits are violated:
 - **Locked modes:** Large locked mode amplitude
 
 The disruption probability increases as multiple limits are approached
-simultaneously. A thermal quench (rapid loss of stored energy) is followed
-by a current quench (rapid loss of plasma current).
+simultaneously. The displayed quantity is a **hazard rate**: the
+probability per second that a disruption begins. It is built only from
+named causes (the four limits above plus a small locked-mode baseline of
+0.05 %/s, amplified near the limits); there is no constant floor, so a
+pulse kept well inside its limits almost never disrupts.
+
+Once triggered, the sequence is: precursor (50-100 ms, growing locked-mode
+amplitude), thermal quench (1-3 ms), then current quench (5-50 ms).
+
+**Thermal quench and the Ip spike.** The thermal quench flattens the
+current profile. Poloidal flux is conserved on this timescale, so with
+L_p ∝ Λ_ext + l_i/2 (Λ_ext = ln(8R/(a√κ)) − 2) the total current rises by
+
+    ΔIp/Ip = Δ(l_i/2) / (Λ_ext + l_i/2)
+
+The flattening is taken as partial (l_i falls by 30 %, floored at 0.5),
+which gives overshoots of 5-15 % for the devices here (about 12 % on
+DIII-D with l_i = 1.2, about 9 % on ITER with l_i = 0.8). Both l_i and Ip
+follow a quarter-sine over the quench, so the spike peaks at its end; Te
+collapses linearly to ~1 % over the same interval. This is the inductive
+Ip spike seen at every real disruption.
+
+**Current quench.** From the top of the spike, Ip decays exponentially
+with a time constant of one third of the quench duration, reaching zero
+at the end; l_i stays flat. The envelope is evaluated at the elapsed
+quench time and applied to the onset current, so it is exact for any
+integration step. The frontend steps and records the physics at 0.25 ms
+through both quench phases (5 ms elsewhere), so the spike and the decay
+render as curves.
+
+**Cause attribution.** When the stochastic trigger fires, the model records
+which hazard term dominated at that instant, weighted exactly as the terms
+combine in the hazard (the four limit terms cubed, the locked-mode baseline
+linearly): density limit, beta limit, kink limit, radiative collapse or
+locked mode. A disruption forced by the last closed flux surface crossing
+the first wall is recorded as wall contact. The snapshot carries the cause
+(`disruption_cause`), the five individual terms (`risk_*`) and the L-H
+threshold (`p_lh`), so the control room can say why a pulse ended and what
+an operator would change. Whenever there is no plasma to reconstruct, below
+0.1 MA at the start and end of a pulse and once the current quench is
+complete, the reconstructed quantities (q95, βN, l_i, τE, H98, f_GW, λq,
+f_det) have no physical meaning and the control room marks them INVALID
+rather than showing a number; l_i in particular is a profile-shape ratio
+and does not go to zero with the current.
 
 ---
 
